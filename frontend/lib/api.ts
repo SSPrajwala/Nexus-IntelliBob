@@ -65,8 +65,16 @@ export const api = {
   },
 
   // Incidents
-  getIncidents: async (): Promise<{ success: boolean; incidents: IncidentDNA[] }> => {
-    return fetchApi<{ success: boolean; incidents: IncidentDNA[] }>("/api/incidents");
+  getIncidents: async (): Promise<{ success: boolean; incidents: IncidentDNA[]; extracted_dnas?: any[] }> => {
+    return fetchApi<{ success: boolean; incidents: IncidentDNA[]; extracted_dnas?: any[] }>("/api/incidents");
+  },
+
+  // Extract DNA from text
+  extractDNAFromText: async (data: { incident_text: string; incident_title: string }): Promise<{ success: boolean; message: string; dna?: any }> => {
+    return fetchApi<{ success: boolean; message: string; dna?: any }>("/api/extract-dna", {
+      method: "POST",
+      body: JSON.stringify(data),
+    });
   },
 
   // Ingest repository

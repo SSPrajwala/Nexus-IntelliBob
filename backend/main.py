@@ -3,6 +3,8 @@ from fastapi.middleware.cors import CORSMiddleware
 from contextlib import asynccontextmanager
 import uvicorn
 from datetime import datetime
+from pydantic import BaseModel
+from typing import List, Optional
 
 from models import (
     HealthResponse,
@@ -14,6 +16,7 @@ from models import (
     DashboardStats
 )
 import db
+import dna_engine
 
 
 @asynccontextmanager
@@ -65,14 +68,77 @@ async def get_dashboard_stats():
         raise HTTPException(status_code=500, detail=f"Failed to fetch dashboard stats: {str(e)}")
 
 
+# New request/response models for DNA extraction
+class ExtractDNAFromTextRequest(BaseModel):
+    incident_text: str
+    incident_title: str
+
+
+class ExtractDNAFromTextResponse(BaseModel):
+    success: bool
+    message: str
+    dna: Optional[dict] = None
+
+
 @app.get("/api/incidents")
 async def get_incidents():
-    """Get all incidents."""
+    """
+    Get all incidents with optional DNA extraction from demo files.
+    Automatically loads and extracts DNA from demo incident reports.
+    """
     try:
+        import os
+        from pathlib import Path
+        
+        # Check if we have demo incidents to load
+        demo_incidents_dir = Path("demo-repos/incidents")
+        extracted_dnas = []
+        
+        if demo_incidents_dir.exists():
+            incident_files = list(demo_incidents_dir.glob("*.txt"))
+            if incident_files:
+                # Extract DNA from demo incidents
+                extracted_dnas = dna_engine.extract_dna_batch([str(f) for f in incident_files])
+        
+        # Get existing incidents from database
         incidents = db.get_all_incidents()
-        return {"success": True, "incidents": incidents}
+        
+        return {
+            "success": True,
+            "incidents": incidents,
+            "extracted_dnas": extracted_dnas
+        }
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to fetch incidents: {str(e)}")
+
+
+@app.post("/api/extract-dna", response_model=ExtractDNAFromTextResponse)
+async def extract_dna_from_text(request: ExtractDNAFromTextRequest):
+    """
+    Extract DNA signature from incident text.
+    Analyzes the incident report and identifies failure patterns.
+    """
+    try:
+        if not request.incident_text or not request.incident_title:
+            return ExtractDNAFromTextResponse(
+                success=False,
+                message="Both incident_text and incident_title are required"
+            )
+        
+        # Extract DNA using the engine
+        dna = dna_engine.extract_dna(request.incident_text, request.incident_title)
+        
+        return ExtractDNAFromTextResponse(
+            success=True,
+            message="DNA extracted successfully",
+            dna=dna
+        )
+        
+    except Exception as e:
+        return ExtractDNAFromTextResponse(
+            success=False,
+            message=f"Failed to extract DNA: {str(e)}"
+        )
 
 
 @app.post("/api/ingest-repo", response_model=IngestRepoResponse)
