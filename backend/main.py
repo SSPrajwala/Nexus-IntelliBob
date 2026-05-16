@@ -6,6 +6,10 @@ from datetime import datetime
 from pydantic import BaseModel
 from typing import List, Optional
 import os
+import logging
+
+# Initialize logger
+logger = logging.getLogger(__name__)
 
 from models import (
     HealthResponse,
