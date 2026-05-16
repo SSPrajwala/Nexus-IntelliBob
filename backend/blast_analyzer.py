@@ -202,21 +202,100 @@ class BlastAnalyzer:
             return 'medium'
         
         return 'low'
+    def _compute_system_wide_blast_radius(self) -> BlastRadiusResult:
+        """
+        Compute blast radius for complete system failure (ALL mode).
+        Analyzes platform-wide impact and architectural weaknesses.
+        """
+        logger.info("Computing system-wide blast radius")
+        
+        # All services are affected in system-wide failure
+        all_services = list(self.services.keys())
+        
+        # Create propagation chain showing simultaneous failure
+        propagation_chain = []
+        for i, service in enumerate(all_services[:5]):  # Limit to first 5 for display
+            propagation_chain.append({
+                "service": service,
+                "time_offset": 0,  # Simultaneous failure
+                "impact_type": "complete_failure",
+                "description": f"{service.replace('-service', '').title()} - Complete service unavailability"
+            })
+        
+        # System-wide failure has maximum criticality
+        criticality_score = 100
+        
+        # Determine failure type
+        failure_type = "platform_wide_outage"
+        
+        # Maximum business impact
+        customer_impact = "Complete platform unavailability - All users unable to access any services"
+        revenue_risk = "$5M+/hour - Total platform shutdown"
+        
+        # Generate system-wide recommendations
+        recommendations = [
+            "Activate disaster recovery procedures immediately",
+            "Failover to backup datacenter if available",
+            "Enable emergency maintenance mode",
+            "Notify all customers of platform-wide outage",
+            "Activate full incident command structure",
+            "Prepare for extended recovery timeline",
+            "Document all recovery actions for post-mortem",
+            "Consider rolling back recent platform changes",
+            "Engage vendor support for critical infrastructure",
+            "Prepare executive communication plan"
+        ]
+        
+        # Build graph showing all services as failed
+        graph = self._build_graph_representation("entire-system", all_services)
+        
+        return BlastRadiusResult(
+            root_failure_service="entire-system",
+            affected_services=all_services,
+            criticality_score=criticality_score,
+            estimated_customer_impact=customer_impact,
+            estimated_revenue_risk=revenue_risk,
+            propagation_chain=propagation_chain,
+            failure_type=failure_type,
+            containment_recommendations=recommendations,
+            graph=graph
+        )
     
-    def compute_blast_radius(self, failed_service: str) -> BlastRadiusResult:
+    
+    def compute_blast_radius(self, failed_service: str, failure_mode: str = "specific") -> BlastRadiusResult:
         """
         Compute blast radius for a failed service
         
         Args:
             failed_service: Name of the service that failed
+            failure_mode: "auto", "all", or "specific" - determines analysis scope
             
         Returns:
             BlastRadiusResult with impact analysis
         """
-        if failed_service not in self.services:
-            raise ValueError(f"Service {failed_service} not found")
+        # Handle "all" mode - system-wide failure
+        if failure_mode == "all":
+            return self._compute_system_wide_blast_radius()
         
-        logger.info(f"Computing blast radius for {failed_service}")
+        # Handle specific/auto mode - single component failure
+        if failed_service not in self.services:
+            # If service not found, try to find closest match or use first service
+            if self.services:
+                logger.warning(f"Service {failed_service} not found, using first available service")
+                failed_service = list(self.services.keys())[0]
+            else:
+                # No services detected - create synthetic service for analysis
+                logger.warning(f"No services detected, creating synthetic service for analysis")
+                self.services['repository-root'] = ServiceNode(
+                    name='repository-root',
+                    path='.',
+                    dependencies=set(),
+                    dependents=set(),
+                    criticality='high'
+                )
+                failed_service = 'repository-root'
+        
+        logger.info(f"Computing blast radius for {failed_service} (mode: {failure_mode})")
         
         # Compute affected services through cascading failures
         affected_services, propagation_chain = self._compute_cascading_failures(failed_service)
@@ -509,17 +588,24 @@ class BlastAnalyzer:
         }
 
 
-def analyze_blast_radius(repo_path: str, failed_service: str) -> Dict:
+def analyze_blast_radius(
+    repo_path: str,
+    failed_service: Optional[str] = None,
+    failure_mode: str = "auto"
+) -> Dict:
     """
-    Main entry point for blast radius analysis
+    Main entry point for blast radius analysis with intelligent failure modes.
     
     Args:
         repo_path: Path to repository (will be resolved using centralized path manager)
-        failed_service: Name of failed service
+        failed_service: Name of failed service (optional if using auto/all mode)
+        failure_mode: "auto" (default), "all", or "specific"
         
     Returns:
         Dictionary with blast radius analysis
     """
+    from services.failure_simulator import simulate_failure
+    
     # Resolve repository path using centralized manager
     resolved_path = resolve_repo_path(repo_path)
     if resolved_path is None:
@@ -530,8 +616,27 @@ def analyze_blast_radius(repo_path: str, failed_service: str) -> Dict:
     # Analyze repository with resolved path
     analyzer.analyze_repository(str(resolved_path))
     
+    # Determine failure target using intelligent simulation
+    if failure_mode in ["auto", "all"]:
+        failure_target, failure_context = simulate_failure(
+            str(resolved_path),
+            failure_mode=failure_mode
+        )
+        failed_service = failure_target['target_name']
+    elif not failed_service:
+        # If specific mode but no service provided, fall back to auto
+        failure_target, failure_context = simulate_failure(
+            str(resolved_path),
+            failure_mode="auto"
+        )
+        failed_service = failure_target['target_name']
+    
+    # Ensure failed_service is not None
+    if not failed_service:
+        raise ValueError("Failed service must be specified or auto-detected")
+    
     # Compute blast radius
-    result = analyzer.compute_blast_radius(failed_service)
+    result = analyzer.compute_blast_radius(failed_service, failure_mode)
     
     return result.to_dict()
 

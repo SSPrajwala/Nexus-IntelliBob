@@ -43,6 +43,21 @@ interface DemoData {
   timeline?: any;
 }
 
+// Cinematic stage durations (in ms) - moved outside component to avoid recreation
+const STAGE_DURATIONS = {
+  intro: 3000,
+  loading: 2000,
+  ingestion: 4000,
+  architecture: 6000,
+  scanning: 5000,
+  risks: 7000,
+  blast: 8000,
+  premortem: 10000,
+  timeline: 8000,
+  executive: 10000,
+  finale: 0, // Manual control
+};
+
 export default function DemoModePlayer() {
   const [stage, setStage] = useState<DemoStage>("intro");
   const [progress, setProgress] = useState(0);
@@ -53,21 +68,6 @@ export default function DemoModePlayer() {
 
   const DEMO_REPO_URL = "https://github.com/tiangolo/fastapi";
   const DEMO_SERVICE = "main";
-
-  // Cinematic stage durations (in ms)
-  const STAGE_DURATIONS = {
-    intro: 3000,
-    loading: 2000,
-    ingestion: 4000,
-    architecture: 6000,
-    scanning: 5000,
-    risks: 7000,
-    blast: 8000,
-    premortem: 10000,
-    timeline: 8000,
-    executive: 10000,
-    finale: 0, // Manual control
-  };
 
   const startDemo = async () => {
     setIsPlaying(true);
@@ -191,9 +191,11 @@ export default function DemoModePlayer() {
 
     executeStage();
 
+    // Cleanup function with safe ref handling
     return () => {
-      if (stageTimeoutRef.current) {
-        clearTimeout(stageTimeoutRef.current);
+      const timeout = stageTimeoutRef.current;
+      if (timeout) {
+        clearTimeout(timeout);
       }
     };
   }, [stage, isPlaying]);

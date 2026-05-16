@@ -118,10 +118,11 @@ export const api = {
     });
   },
 
-  // Compute blast radius (new implementation)
+  // Compute blast radius (new implementation with failure modes)
   computeBlastRadius: async (data: {
     repo_path: string;
-    failed_service: string;
+    failure_mode?: string;
+    failed_service?: string;
   }): Promise<{
     success: boolean;
     message: string;

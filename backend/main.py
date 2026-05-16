@@ -507,10 +507,32 @@ async def scan_repo(request: ScanRepoRequest):
         )
 
 
+@app.get("/api/failure-modes")
+async def get_failure_modes():
+    """
+    Get available failure simulation modes for the frontend.
+    Returns options for the failure mode selector.
+    """
+    from services.failure_simulator import get_failure_mode_options
+    
+    try:
+        modes = get_failure_mode_options()
+        return {
+            "success": True,
+            "modes": modes
+        }
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to get failure modes: {str(e)}"
+        )
+
+
 # New request/response models for blast radius
 class ComputeBlastRadiusRequest(BaseModel):
     repo_path: str
-    failed_service: str
+    failed_service: Optional[str] = None  # Now optional - can use failure modes
+    failure_mode: str = "auto"  # "auto", "all", or "specific"
 
 
 class ComputeBlastRadiusResponse(BaseModel):
@@ -539,7 +561,8 @@ async def compute_blast_radius(request: ComputeBlastRadiusRequest):
     
     try:
         repo_path = request.repo_path.strip()
-        failed_service = request.failed_service.strip()
+        failed_service = request.failed_service.strip() if request.failed_service else None
+        failure_mode = request.failure_mode or "auto"
         
         # Validate inputs
         if not repo_path:
@@ -548,10 +571,18 @@ async def compute_blast_radius(request: ComputeBlastRadiusRequest):
                 detail="Repository path cannot be empty"
             )
         
-        if not failed_service:
+        # Validate failure mode
+        if failure_mode not in ["auto", "all", "specific"]:
             raise HTTPException(
                 status_code=400,
-                detail="Failed service name cannot be empty"
+                detail="Invalid failure_mode. Must be 'auto', 'all', or 'specific'"
+            )
+        
+        # If specific mode, failed_service is required
+        if failure_mode == "specific" and not failed_service:
+            raise HTTPException(
+                status_code=400,
+                detail="Failed service name required when using 'specific' failure mode"
             )
         
         # Check if it's a GitHub URL
@@ -580,12 +611,25 @@ async def compute_blast_radius(request: ComputeBlastRadiusRequest):
                     detail=str(ve)
                 )
         
-        # Analyze blast radius
-        result = blast_analyzer.analyze_blast_radius(repo_path, failed_service)
+        # Analyze blast radius with intelligent failure mode
+        result = blast_analyzer.analyze_blast_radius(
+            repo_path,
+            failed_service=failed_service,
+            failure_mode=failure_mode
+        )
+        
+        # Get display name for message
+        target_name = result["root_failure_service"]
+        if failure_mode == "all":
+            message = "System-wide blast radius computed successfully"
+        elif failure_mode == "auto":
+            message = f"Blast radius computed successfully (auto-selected: {target_name})"
+        else:
+            message = f"Blast radius computed successfully for {target_name}"
         
         return ComputeBlastRadiusResponse(
             success=True,
-            message=f"Blast radius computed successfully for {failed_service}",
+            message=message,
             root_failure_service=result["root_failure_service"],
             affected_services=result["affected_services"],
             criticality_score=result["criticality_score"],
