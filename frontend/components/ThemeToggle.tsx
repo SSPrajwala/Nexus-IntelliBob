@@ -6,17 +6,14 @@ import { motion } from "framer-motion";
 import { useEffect, useState } from "react";
 
 export default function ThemeToggle() {
+  // MUST call hooks at top level - never conditionally
+  const { theme, toggleTheme } = useTheme();
   const [mounted, setMounted] = useState(false);
   
   // Prevent hydration mismatch
   useEffect(() => {
     setMounted(true);
   }, []);
-
-  // Only access theme context after component is mounted
-  const themeContext = mounted ? useTheme() : null;
-  const theme = themeContext?.theme || "dark";
-  const toggleTheme = themeContext?.toggleTheme || (() => {});
 
   // Don't render until mounted to prevent hydration issues
   if (!mounted) {

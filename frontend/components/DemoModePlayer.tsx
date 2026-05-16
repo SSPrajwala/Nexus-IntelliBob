@@ -79,8 +79,9 @@ export default function DemoModePlayer() {
 
   const stopDemo = () => {
     setIsPlaying(false);
-    if (stageTimeoutRef.current) {
-      clearTimeout(stageTimeoutRef.current);
+    const timeout = stageTimeoutRef.current;
+    if (timeout) {
+      clearTimeout(timeout);
     }
   };
 
