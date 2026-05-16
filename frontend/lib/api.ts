@@ -11,6 +11,7 @@ import {
   BlastRadiusResponse,
   PreMortemRequest,
   PreMortemResponse,
+  PreMortemReport,
   HealthResponse,
 } from "@/types";
 
@@ -101,17 +102,80 @@ export const api = {
     });
   },
 
-  // Calculate blast radius
+  // Scan repository (enhanced version with detailed risk analysis)
+  scanRepository: async (repoPath: string): Promise<ScanRepoResponse> => {
+    return fetchApi<ScanRepoResponse>("/api/scan-repo", {
+      method: "POST",
+      body: JSON.stringify({ repo_path: repoPath }),
+    });
+  },
+
+  // Calculate blast radius (legacy)
   calculateBlastRadius: async (data: BlastRadiusRequest): Promise<BlastRadiusResponse> => {
-    return fetchApi<BlastRadiusResponse>("/api/blast-radius", {
+    return fetchApi<BlastRadiusResponse>("/api/blast-radius-legacy", {
       method: "POST",
       body: JSON.stringify(data),
     });
   },
 
-  // Generate pre-mortem
-  generatePreMortem: async (data: PreMortemRequest): Promise<PreMortemResponse> => {
-    return fetchApi<PreMortemResponse>("/api/premortem", {
+  // Compute blast radius (new implementation)
+  computeBlastRadius: async (data: {
+    repo_path: string;
+    failed_service: string;
+  }): Promise<{
+    success: boolean;
+    message: string;
+    root_failure_service?: string;
+    affected_services?: string[];
+    criticality_score?: number;
+    estimated_customer_impact?: string;
+    estimated_revenue_risk?: string;
+    propagation_chain?: Array<{
+      service: string;
+      time_offset: number;
+      impact_type: string;
+      description: string;
+    }>;
+    failure_type?: string;
+    containment_recommendations?: string[];
+    graph?: {
+      nodes: Array<{
+        id: string;
+        label: string;
+        status: string;
+        criticality: string;
+      }>;
+      edges: Array<{
+        source: string;
+        target: string;
+        type: string;
+      }>;
+    };
+  }> => {
+    return fetchApi("/api/blast-radius", {
+      method: "POST",
+      body: JSON.stringify(data),
+    });
+  },
+
+  // Generate pre-mortem (legacy)
+  generatePreMortemLegacy: async (data: PreMortemRequest): Promise<PreMortemResponse> => {
+    return fetchApi<PreMortemResponse>("/api/premortem-legacy", {
+      method: "POST",
+      body: JSON.stringify(data),
+    });
+  },
+
+  // Generate pre-mortem intelligence report (new comprehensive version)
+  generatePreMortem: async (data: {
+    repo_path: string;
+    failed_service: string;
+  }): Promise<{
+    success: boolean;
+    message: string;
+    report?: PreMortemReport;
+  }> => {
+    return fetchApi("/api/premortem", {
       method: "POST",
       body: JSON.stringify(data),
     });

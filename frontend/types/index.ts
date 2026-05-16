@@ -41,6 +41,14 @@ export interface RiskMatch {
   description: string;
   recommendation?: string;
   created_at?: string;
+  // New fields from risk scanner
+  risk_type?: string;
+  severity?: SeverityLevel;
+  confidence?: number;
+  matched_code?: string;
+  explanation?: string;
+  related_incident_pattern?: string;
+  blast_radius_score?: number;
 }
 
 export interface ScanResult {
@@ -77,6 +85,77 @@ export interface BlastRadius {
   estimated_downtime_minutes?: number;
   mitigation_priority: SeverityLevel;
   created_at?: string;
+}
+
+export interface OutageTimelineEvent {
+  time: string;
+  event: string;
+  description: string;
+  severity: "warning" | "high" | "critical";
+}
+
+export interface BusinessImpact {
+  revenue_loss_per_hour: string;
+  customer_churn_risk: string;
+  brand_reputation: string;
+  sla_breach: string;
+  regulatory_impact: string;
+}
+
+export interface OperationalSignal {
+  metric: string;
+  threshold: string;
+  alert_severity: "warning" | "critical";
+  description: string;
+}
+
+export interface CascadingFailureAnalysis {
+  propagation_depth: number;
+  total_services_at_risk: number;
+  cascade_velocity: string;
+  containment_difficulty: string;
+}
+
+export interface ScanSummary {
+  total_risks_found: number;
+  critical_risks: number;
+  high_risks: number;
+  files_analyzed: number;
+}
+
+export interface BlastRadiusSummary {
+  epicenter: string;
+  affected_count: number;
+  criticality_score: number;
+  failure_type: string;
+}
+
+export interface PreMortemReport {
+  report_id: string;
+  generated_at: string;
+  incident_title: string;
+  executive_summary: string;
+  probable_failure_scenario: string;
+  likely_root_cause: string;
+  affected_services: string[];
+  outage_timeline: OutageTimelineEvent[];
+  customer_impact: string;
+  business_impact: BusinessImpact;
+  estimated_revenue_loss: string;
+  mitigation_steps: string[];
+  engineering_recommendations: string[];
+  confidence_score: number;
+  risk_level: "CRITICAL" | "HIGH" | "MEDIUM" | "LOW";
+  estimated_time_to_incident: string;
+  similar_historical_incidents: Array<{
+    pattern: string;
+    confidence: number;
+    description: string;
+  }>;
+  cascading_failure_analysis: CascadingFailureAnalysis;
+  operational_signals_to_monitor: OperationalSignal[];
+  scan_summary: ScanSummary;
+  blast_radius_summary: BlastRadiusSummary;
 }
 
 export interface PreMortem {
@@ -147,6 +226,15 @@ export interface ScanRepoResponse {
   scan_id?: string;
   matches_found: number;
   risk_matches: RiskMatch[];
+  // New fields from enhanced scanner
+  repository?: string;
+  total_files_scanned?: number;
+  total_risks?: number;
+  critical_risks?: number;
+  high_risks?: number;
+  medium_risks?: number;
+  low_risks?: number;
+  matches?: RiskMatch[];
 }
 
 export interface BlastRadiusRequest {

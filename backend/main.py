@@ -5,6 +5,7 @@ import uvicorn
 from datetime import datetime
 from pydantic import BaseModel
 from typing import List, Optional
+import os
 
 from models import (
     HealthResponse,
@@ -17,6 +18,10 @@ from models import (
 )
 import db
 import dna_engine
+import risk_scanner
+import blast_analyzer
+import repo_ingestor
+import premortem_generator
 
 
 @asynccontextmanager
@@ -266,107 +271,193 @@ async def extract_dna(request: ExtractDNARequest):
         )
 
 
-@app.post("/api/scan-repo", response_model=ScanRepoResponse)
+@app.post("/api/scan-repo")
 async def scan_repo(request: ScanRepoRequest):
     """
-    Scan a repository for patterns matching known incident DNA.
-    This identifies potential risks before they become incidents.
+    Scan a repository for architectural risk patterns.
+    Uses production-quality pattern detection to identify risks before they become incidents.
+    Supports both relative paths (e.g., 'demo-repos/payment-system') and absolute paths.
     """
     try:
-        import os
-        from pathlib import Path
-        import time
-        
-        start_time = time.time()
         repo_path = request.repo_path
         
-        if not os.path.exists(repo_path):
-            return ScanRepoResponse(
-                success=False,
-                message=f"Repository path does not exist: {repo_path}",
-                matches_found=0,
-                risk_matches=[]
+        # Validate input
+        if not repo_path or not repo_path.strip():
+            raise HTTPException(
+                status_code=400,
+                detail="Repository path cannot be empty"
             )
         
-        # Get incidents to scan for
-        incidents = db.get_all_incidents()
-        if request.incident_dna_ids:
-            incidents = [inc for inc in incidents if inc['id'] in request.incident_dna_ids]
+        # Run the risk scanner (it handles path resolution internally)
+        try:
+            scan_results = risk_scanner.scan_repository(repo_path)
+        except ValueError as ve:
+            # Path resolution or validation error
+            raise HTTPException(
+                status_code=404,
+                detail=str(ve)
+            )
+        except PermissionError:
+            raise HTTPException(
+                status_code=403,
+                detail=f"Permission denied accessing repository: {repo_path}"
+            )
         
-        risk_matches = []
-        files_scanned = 0
-        
-        # Scan repository files
-        path_obj = Path(repo_path)
-        for file_path in path_obj.rglob('*.py'):
-            files_scanned += 1
-            try:
-                with open(file_path, 'r', encoding='utf-8') as f:
-                    content = f.read()
-                    lines = content.split('\n')
-                    
-                    # Check for patterns
-                    for incident in incidents:
-                        patterns = incident.get('failure_patterns', '[]')
-                        if isinstance(patterns, str):
-                            import json
-                            patterns = json.loads(patterns)
-                        
-                        for pattern in patterns:
-                            for line_num, line in enumerate(lines, 1):
-                                if pattern.replace('_', ' ') in line.lower():
-                                    risk_match = {
-                                        "incident_dna_id": incident['id'],
-                                        "repo_path": repo_path,
-                                        "file_path": str(file_path.relative_to(path_obj)),
-                                        "line_number": line_num,
-                                        "pattern_matched": pattern,
-                                        "confidence_score": 0.75,
-                                        "risk_level": incident['severity'],
-                                        "description": f"Pattern '{pattern}' found matching incident: {incident['title']}",
-                                        "recommendation": f"Review this code section for potential {pattern} issues"
-                                    }
-                                    match_id = db.insert_risk_match(risk_match)
-                                    risk_match['id'] = match_id
-                                    risk_matches.append(risk_match)
-            except Exception as e:
-                continue
-        
-        # Create scan result
-        scan_duration = time.time() - start_time
-        scan_result = {
+        # Store scan results in database
+        scan_record = {
             "repo_path": repo_path,
-            "scan_type": "pattern_matching",
-            "total_files_scanned": files_scanned,
-            "matches_found": len(risk_matches),
-            "scan_duration_seconds": scan_duration,
+            "scan_type": "architectural_risk_analysis",
+            "total_files_scanned": scan_results["total_files_scanned"],
+            "matches_found": scan_results["total_risks"],
+            "scan_duration_seconds": 0.0,  # Scanner doesn't track duration yet
             "started_at": datetime.utcnow().isoformat(),
             "completed_at": datetime.utcnow().isoformat(),
             "status": "completed"
         }
         
-        scan_id = db.insert_scan_result(scan_result)
+        scan_id = db.insert_scan_result(scan_record)
         
-        return ScanRepoResponse(
-            success=True,
-            message=f"Scan completed. Found {len(risk_matches)} potential risks.",
-            scan_id=scan_id,
-            matches_found=len(risk_matches),
-            risk_matches=risk_matches
-        )
+        # Store individual risk matches
+        for match in scan_results["matches"]:
+            risk_match = {
+                "incident_dna_id": match["related_incident_pattern"],
+                "repo_path": repo_path,
+                "file_path": match["file_path"],
+                "line_number": match["line_number"],
+                "pattern_matched": match["risk_type"],
+                "confidence_score": match["confidence"],
+                "risk_level": match["severity"],
+                "description": match["explanation"],
+                "recommendation": match["recommendation"]
+            }
+            match_id = db.insert_risk_match(risk_match)
+            match["db_id"] = match_id
         
+        return {
+            "success": True,
+            "message": f"Scan completed. Found {scan_results['total_risks']} potential risks.",
+            "scan_id": scan_id,
+            "repository": scan_results["repository"],
+            "total_files_scanned": scan_results["total_files_scanned"],
+            "total_risks": scan_results["total_risks"],
+            "critical_risks": scan_results["critical_risks"],
+            "high_risks": scan_results["high_risks"],
+            "medium_risks": scan_results["medium_risks"],
+            "low_risks": scan_results["low_risks"],
+            "matches": scan_results["matches"]
+        }
+        
+    except HTTPException:
+        raise
     except Exception as e:
-        return ScanRepoResponse(
-            success=False,
-            message=f"Failed to scan repository: {str(e)}",
-            matches_found=0,
-            risk_matches=[]
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to scan repository: {str(e)}"
         )
 
 
-@app.post("/api/blast-radius", response_model=BlastRadiusResponse)
+# New request/response models for blast radius
+class ComputeBlastRadiusRequest(BaseModel):
+    repo_path: str
+    failed_service: str
+
+
+class ComputeBlastRadiusResponse(BaseModel):
+    success: bool
+    message: str
+    root_failure_service: Optional[str] = None
+    affected_services: Optional[List[str]] = None
+    criticality_score: Optional[int] = None
+    estimated_customer_impact: Optional[str] = None
+    estimated_revenue_risk: Optional[str] = None
+    propagation_chain: Optional[List[dict]] = None
+    failure_type: Optional[str] = None
+    containment_recommendations: Optional[List[str]] = None
+    graph: Optional[dict] = None
+
+
+@app.post("/api/blast-radius", response_model=ComputeBlastRadiusResponse)
+async def compute_blast_radius(request: ComputeBlastRadiusRequest):
+    """
+    Compute blast radius for a failed service.
+    Analyzes service dependencies and simulates cascading failures.
+    Supports both local paths and GitHub URLs.
+    """
+    try:
+        repo_path = request.repo_path.strip()
+        failed_service = request.failed_service.strip()
+        
+        # Validate inputs
+        if not repo_path:
+            raise HTTPException(
+                status_code=400,
+                detail="Repository path cannot be empty"
+            )
+        
+        if not failed_service:
+            raise HTTPException(
+                status_code=400,
+                detail="Failed service name cannot be empty"
+            )
+        
+        # Check if it's a GitHub URL
+        ingestor = repo_ingestor.RepoIngestor()
+        if ingestor.is_github_url(repo_path):
+            # Clone the repository
+            success, local_path, error = ingestor.clone_repository(repo_path)
+            if not success:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"Failed to clone repository: {error}"
+                )
+            repo_path = local_path
+        else:
+            # Handle relative paths
+            if not os.path.isabs(repo_path):
+                repo_path = os.path.abspath(repo_path)
+        
+        # Validate repository exists
+        if not os.path.exists(repo_path):
+            raise HTTPException(
+                status_code=404,
+                detail=f"Repository not found: {repo_path}"
+            )
+        
+        # Analyze blast radius
+        result = blast_analyzer.analyze_blast_radius(repo_path, failed_service)
+        
+        return ComputeBlastRadiusResponse(
+            success=True,
+            message=f"Blast radius computed successfully for {failed_service}",
+            root_failure_service=result["root_failure_service"],
+            affected_services=result["affected_services"],
+            criticality_score=result["criticality_score"],
+            estimated_customer_impact=result["estimated_customer_impact"],
+            estimated_revenue_risk=result["estimated_revenue_risk"],
+            propagation_chain=result["propagation_chain"],
+            failure_type=result["failure_type"],
+            containment_recommendations=result["containment_recommendations"],
+            graph=result["graph"]
+        )
+        
+    except HTTPException:
+        raise
+    except ValueError as ve:
+        raise HTTPException(
+            status_code=400,
+            detail=str(ve)
+        )
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to compute blast radius: {str(e)}"
+        )
+
+
+@app.post("/api/blast-radius-legacy", response_model=BlastRadiusResponse)
 async def calculate_blast_radius(request: BlastRadiusRequest):
     """
+    Legacy blast radius endpoint (kept for backward compatibility).
     Calculate the blast radius of a risk match.
     This determines what would be affected if this risk becomes an incident.
     """
@@ -417,11 +508,114 @@ async def calculate_blast_radius(request: BlastRadiusRequest):
         )
 
 
-@app.post("/api/premortem", response_model=PreMortemResponse)
-async def generate_premortem(request: PreMortemRequest):
+@app.post("/api/premortem")
+async def generate_premortem_intelligence(request: dict):
     """
+    Generate comprehensive pre-mortem intelligence report.
+    Combines repository scan, blast radius, and incident DNA correlation.
+    Supports both local paths and GitHub URLs.
+    """
+    try:
+        repo_path = request.get('repo_path', '').strip()
+        failed_service = request.get('failed_service', '').strip()
+        
+        # Validate inputs
+        if not repo_path:
+            raise HTTPException(
+                status_code=400,
+                detail="Repository path cannot be empty"
+            )
+        
+        if not failed_service:
+            raise HTTPException(
+                status_code=400,
+                detail="Failed service name cannot be empty"
+            )
+        
+        # Handle GitHub URLs
+        ingestor = repo_ingestor.RepoIngestor()
+        cleanup_needed = False
+        
+        if ingestor.is_github_url(repo_path):
+            success, local_path, error = ingestor.clone_repository(repo_path)
+            if not success:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"Failed to clone repository: {error}"
+                )
+            repo_path = local_path
+            cleanup_needed = True
+        else:
+            # Handle relative paths
+            if not os.path.isabs(repo_path):
+                repo_path = os.path.abspath(repo_path)
+        
+        # Validate repository exists
+        if not os.path.exists(repo_path):
+            raise HTTPException(
+                status_code=404,
+                detail=f"Repository not found: {repo_path}"
+            )
+        
+        try:
+            # Step 1: Scan repository for risks
+            scan_results = risk_scanner.scan_repository(repo_path)
+            
+            # Step 2: Compute blast radius
+            blast_results = blast_analyzer.analyze_blast_radius(repo_path, failed_service)
+            
+            # Step 3: Correlate with incident DNA (get similar patterns)
+            dna_matches = []
+            if scan_results.get('matches'):
+                # Get related incident patterns from the first few high-severity risks
+                for match in scan_results['matches'][:3]:
+                    if match.get('related_incident_pattern'):
+                        dna_matches.append({
+                            'pattern': match['related_incident_pattern'],
+                            'confidence': match.get('confidence', 0.7),
+                            'description': match.get('explanation', '')
+                        })
+            
+            # Step 4: Generate pre-mortem report
+            premortem_report = premortem_generator.generate_premortem(
+                scan_results,
+                blast_results,
+                dna_matches
+            )
+            
+            return {
+                "success": True,
+                "message": "Pre-mortem intelligence report generated successfully",
+                "report": premortem_report
+            }
+        
+        finally:
+            # Cleanup cloned repository if needed
+            if cleanup_needed:
+                try:
+                    ingestor.cleanup_repository(repo_path)
+                except Exception as cleanup_error:
+                    print(f"Warning: Failed to cleanup repository: {cleanup_error}")
+        
+    except HTTPException:
+        raise
+    except ValueError as ve:
+        raise HTTPException(
+            status_code=400,
+            detail=str(ve)
+        )
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to generate pre-mortem: {str(e)}"
+        )
+
+
+@app.post("/api/premortem-legacy", response_model=PreMortemResponse)
+async def generate_premortem_legacy(request: PreMortemRequest):
+    """
+    Legacy pre-mortem endpoint (kept for backward compatibility).
     Generate a pre-mortem report for a blast radius.
-    This creates a detailed analysis of what could go wrong.
     """
     try:
         premortem = {

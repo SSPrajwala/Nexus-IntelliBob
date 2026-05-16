@@ -1,25 +1,281 @@
 "use client";
 
-import { Target } from "lucide-react";
-import EmptyState from "@/components/EmptyState";
+import { useState } from "react";
+import { Target, AlertTriangle, DollarSign, Users, Shield, Zap, Loader2, GitBranch } from "lucide-react";
+import { api } from "@/lib/api";
+import BlastGraph from "@/components/BlastGraph";
+import FailureTimeline from "@/components/FailureTimeline";
+import MetricCard from "@/components/MetricCard";
+import LoadingState from "@/components/LoadingState";
 
 export default function BlastPage() {
+  const [repoPath, setRepoPath] = useState("demo-repos/payment-system");
+  const [failedService, setFailedService] = useState("auth-service");
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [result, setResult] = useState<any>(null);
+  const [animating, setAnimating] = useState(false);
+
+  const availableServices = [
+    { value: "auth-service", label: "Auth Service" },
+    { value: "payment-service", label: "Payment Service" },
+    { value: "order-service", label: "Order Service" },
+  ];
+
+  const handleSimulateFailure = async () => {
+    if (!repoPath.trim() || !failedService.trim()) {
+      setError("Please provide both repository path and failed service");
+      return;
+    }
+
+    setLoading(true);
+    setError(null);
+    setResult(null);
+    setAnimating(true);
+
+    try {
+      // Simulate loading animation
+      await new Promise((resolve) => setTimeout(resolve, 1500));
+
+      const response = await api.computeBlastRadius({
+        repo_path: repoPath,
+        failed_service: failedService,
+      });
+
+      if (response.success) {
+        setResult(response);
+        setAnimating(false);
+      } else {
+        setError(response.message || "Failed to compute blast radius");
+        setAnimating(false);
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "An error occurred");
+      setAnimating(false);
+    } finally {
+      setLoading(false);
+    }
+  };
+
   return (
     <div className="space-y-6">
       {/* Header */}
       <div>
-        <h1 className="text-3xl font-bold text-white mb-2">Blast Radius</h1>
+        <h1 className="text-3xl font-bold text-white mb-2">Blast Radius Intelligence</h1>
         <p className="text-gray-400">
-          Analyze the potential impact of identified risks
+          Simulate cascading failures and analyze operational impact
         </p>
       </div>
 
-      {/* Empty State */}
-      <EmptyState
-        icon={Target}
-        title="No blast radius analyses yet"
-        description="Blast radius analysis shows what would be affected if a risk becomes an incident. Run a scan first to identify risks."
-      />
+      {/* Input Section */}
+      <div className="bg-gray-900/50 border border-gray-800 rounded-lg p-6">
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
+          {/* Repository Input */}
+          <div>
+            <label className="block text-sm font-medium text-gray-300 mb-2">
+              Repository Path
+            </label>
+            <div className="relative">
+              <GitBranch className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-gray-500" />
+              <input
+                type="text"
+                value={repoPath}
+                onChange={(e) => setRepoPath(e.target.value)}
+                placeholder="demo-repos/payment-system"
+                className="w-full pl-10 pr-4 py-2 bg-gray-800 border border-gray-700 rounded-lg text-white placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-blue-500"
+              />
+            </div>
+            <p className="text-xs text-gray-500 mt-1">
+              Local path or GitHub URL
+            </p>
+          </div>
+
+          {/* Service Selector */}
+          <div>
+            <label className="block text-sm font-medium text-gray-300 mb-2">
+              Failed Service
+            </label>
+            <div className="relative">
+              <Target className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-gray-500" />
+              <select
+                value={failedService}
+                onChange={(e) => setFailedService(e.target.value)}
+                className="w-full pl-10 pr-4 py-2 bg-gray-800 border border-gray-700 rounded-lg text-white focus:outline-none focus:ring-2 focus:ring-blue-500 appearance-none cursor-pointer"
+              >
+                {availableServices.map((service) => (
+                  <option key={service.value} value={service.value}>
+                    {service.label}
+                  </option>
+                ))}
+              </select>
+            </div>
+            <p className="text-xs text-gray-500 mt-1">
+              Select service to simulate failure
+            </p>
+          </div>
+        </div>
+
+        {/* Simulate Button */}
+        <button
+          onClick={handleSimulateFailure}
+          disabled={loading}
+          className="w-full bg-gradient-to-r from-red-600 to-orange-600 hover:from-red-700 hover:to-orange-700 disabled:from-gray-700 disabled:to-gray-700 text-white font-semibold py-3 px-6 rounded-lg transition-all duration-200 flex items-center justify-center gap-2 disabled:cursor-not-allowed"
+        >
+          {loading ? (
+            <>
+              <Loader2 className="w-5 h-5 animate-spin" />
+              Simulating Failure...
+            </>
+          ) : (
+            <>
+              <Zap className="w-5 h-5" />
+              Simulate Failure
+            </>
+          )}
+        </button>
+
+        {/* Error Message */}
+        {error && (
+          <div className="mt-4 p-4 bg-red-500/10 border border-red-500/30 rounded-lg flex items-start gap-3">
+            <AlertTriangle className="w-5 h-5 text-red-400 flex-shrink-0 mt-0.5" />
+            <div>
+              <p className="text-red-400 font-medium">Error</p>
+              <p className="text-red-300 text-sm mt-1">{error}</p>
+            </div>
+          </div>
+        )}
+      </div>
+
+      {/* Loading Animation */}
+      {animating && (
+        <div className="bg-gray-900/50 border border-gray-800 rounded-lg p-12">
+          <LoadingState message="Analyzing service dependencies and computing blast radius..." />
+        </div>
+      )}
+
+      {/* Results */}
+      {result && !animating && (
+        <>
+          {/* Impact Summary Cards */}
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+            <MetricCard
+              title="Criticality Score"
+              value={result.criticality_score || 0}
+              icon={AlertTriangle}
+              trend={{
+                value: result.criticality_score >= 80 ? "Critical" : "Moderate",
+                isPositive: false
+              }}
+            />
+            <MetricCard
+              title="Affected Services"
+              value={result.affected_services?.length || 0}
+              icon={Target}
+              trend={{
+                value: `${result.affected_services?.length || 0} services`,
+                isPositive: false
+              }}
+            />
+            <MetricCard
+              title="Revenue Risk"
+              value={result.estimated_revenue_risk || "$0"}
+              icon={DollarSign}
+              trend={{
+                value: "Per hour",
+                isPositive: false
+              }}
+            />
+            <MetricCard
+              title="Customer Impact"
+              value={result.affected_services?.length >= 2 ? "High" : "Medium"}
+              icon={Users}
+              trend={{
+                value: result.affected_services?.length >= 2 ? "Platform-wide" : "Partial",
+                isPositive: false
+              }}
+            />
+          </div>
+
+          {/* Operational Impact Summary */}
+          <div className="bg-gradient-to-br from-red-900/20 to-orange-900/20 border border-red-500/30 rounded-lg p-6">
+            <div className="flex items-start gap-4">
+              <div className="p-3 bg-red-500/20 rounded-lg">
+                <AlertTriangle className="w-6 h-6 text-red-400" />
+              </div>
+              <div className="flex-1">
+                <h3 className="text-lg font-semibold text-white mb-2">
+                  Operational Impact Assessment
+                </h3>
+                <p className="text-gray-300 mb-4">
+                  {result.estimated_customer_impact}
+                </p>
+                <div className="flex flex-wrap gap-2">
+                  <span className="px-3 py-1 bg-red-500/20 text-red-300 rounded-full text-sm font-medium">
+                    {result.failure_type?.replace(/_/g, " ").toUpperCase()}
+                  </span>
+                  <span className="px-3 py-1 bg-orange-500/20 text-orange-300 rounded-full text-sm font-medium">
+                    {result.affected_services?.length || 0} Services Impacted
+                  </span>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          {/* Dependency Graph */}
+          {result.graph && (
+            <div>
+              <h2 className="text-xl font-semibold text-white mb-4 flex items-center gap-2">
+                <Target className="w-5 h-5 text-blue-400" />
+                Service Dependency Graph
+              </h2>
+              <BlastGraph
+                nodes={result.graph.nodes || []}
+                edges={result.graph.edges || []}
+                className="h-[600px]"
+              />
+            </div>
+          )}
+
+          {/* Failure Timeline */}
+          {result.propagation_chain && result.propagation_chain.length > 0 && (
+            <div>
+              <h2 className="text-xl font-semibold text-white mb-4 flex items-center gap-2">
+                <Zap className="w-5 h-5 text-red-400" />
+                Cascading Failure Timeline
+              </h2>
+              <FailureTimeline events={result.propagation_chain} />
+            </div>
+          )}
+
+          {/* Containment Recommendations */}
+          {result.containment_recommendations && result.containment_recommendations.length > 0 && (
+            <div className="bg-gray-900/50 border border-gray-800 rounded-lg p-6">
+              <div className="flex items-center gap-3 mb-4">
+                <div className="p-2 bg-blue-500/10 rounded-lg">
+                  <Shield className="w-5 h-5 text-blue-400" />
+                </div>
+                <div>
+                  <h3 className="text-lg font-semibold text-white">Containment Recommendations</h3>
+                  <p className="text-sm text-gray-400">Immediate actions to mitigate impact</p>
+                </div>
+              </div>
+              <div className="space-y-3">
+                {result.containment_recommendations.map((rec: string, index: number) => (
+                  <div
+                    key={index}
+                    className="flex items-start gap-3 p-3 bg-gray-800/50 rounded-lg hover:bg-gray-800/70 transition-colors"
+                  >
+                    <div className="flex-shrink-0 w-6 h-6 bg-blue-500/20 rounded-full flex items-center justify-center text-blue-400 text-sm font-semibold mt-0.5">
+                      {index + 1}
+                    </div>
+                    <p className="text-gray-300 text-sm">{rec}</p>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+        </>
+      )}
     </div>
   );
 }
