@@ -2,12 +2,13 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { 
-  Home, 
-  AlertTriangle, 
-  Search, 
-  Target, 
-  FileText 
+import {
+  Home,
+  AlertTriangle,
+  Search,
+  Target,
+  FileText,
+  Sparkles
 } from "lucide-react";
 
 const navigation = [
@@ -17,6 +18,8 @@ const navigation = [
   { name: "Blast Radius", href: "/blast", icon: Target },
   { name: "Pre-Mortem", href: "/premortem", icon: FileText },
 ];
+
+const demoLink = { name: "🎬 Cinematic Demo", href: "/demo", icon: Sparkles };
 
 export default function Sidebar() {
   const pathname = usePathname();
@@ -59,6 +62,25 @@ export default function Sidebar() {
             </Link>
           );
         })}
+        
+        {/* Demo Link - Highlighted */}
+        <div className="pt-4 mt-4 border-t border-[#27272a]">
+          <Link
+            href={demoLink.href}
+            className={`
+              flex items-center gap-3 px-3 py-2 rounded-md text-sm font-medium
+              transition-all duration-200
+              ${
+                pathname === demoLink.href
+                  ? "bg-gradient-to-r from-red-500/20 to-orange-500/20 text-orange-400 border border-orange-500/30 shadow-lg shadow-orange-500/20"
+                  : "bg-gradient-to-r from-red-500/10 to-orange-500/10 text-orange-400 border border-orange-500/20 hover:border-orange-500/40 hover:shadow-lg hover:shadow-orange-500/20"
+              }
+            `}
+          >
+            <demoLink.icon className="w-5 h-5 animate-pulse" />
+            {demoLink.name}
+          </Link>
+        </div>
       </nav>
 
       {/* Footer */}

@@ -272,4 +272,167 @@ export interface ApiResponse<T = any> {
   error?: string;
 }
 
+// GitHub Repository Intelligence Types
+export interface RepositoryMetadata {
+  owner: string;
+  repo_name: string;
+  url: string;
+  size_mb: number;
+  file_count: number;
+  detected_languages: Record<string, number>;
+  frameworks: string[];
+  estimated_service_count: number;
+}
+
+export interface ServiceInfo {
+  name: string;
+  path: string;
+  entry_point: string;
+  type: string;
+}
+
+export interface TopologyOverview {
+  total_services: number;
+  service_types: Record<string, number>;
+  architecture_pattern: string;
+  service_list: string[];
+}
+
+export interface ArchitectureSummary {
+  summary: string;
+  services: ServiceInfo[];
+  databases: string[];
+  queues: string[];
+  external_integrations: string[];
+  complexity_score: number;
+  topology: TopologyOverview;
+}
+
+export interface EngineeringRisk {
+  type: string;
+  severity: string;
+  description: string;
+}
+
+export interface OperationalRiskProfile {
+  total_risks: number;
+  risks: EngineeringRisk[];
+  overall_risk_level: string;
+}
+
+export interface RiskSummary {
+  total_risks: number;
+  critical_risks: number;
+  high_risks: number;
+  medium_risks: number;
+  low_risks: number;
+  files_scanned: number;
+  top_risks: RiskMatch[];
+}
+
+export interface BlastRadiusData {
+  root_failure_service: string;
+  affected_services: string[];
+  criticality_score: number;
+  estimated_customer_impact: string;
+  estimated_revenue_risk: string;
+  propagation_chain: Array<{
+    service: string;
+    time_offset: number;
+    impact_type: string;
+    description: string;
+  }>;
+  failure_type: string;
+  containment_recommendations: string[];
+  graph: {
+    nodes: Array<{
+      id: string;
+      label: string;
+      status: string;
+      criticality: string;
+    }>;
+    edges: Array<{
+      source: string;
+      target: string;
+      type: string;
+    }>;
+  };
+}
+
+export interface IntelligenceOverview {
+  success: boolean;
+  message: string;
+  repository_metadata: RepositoryMetadata;
+  architecture_summary: ArchitectureSummary;
+  risk_summary: RiskSummary;
+  blast_radius: BlastRadiusData;
+  premortem_report: PreMortemReport;
+  engineering_risk_profile: OperationalRiskProfile;
+}
+
+export interface AnalyzeGithubRepoRequest {
+  repo_url: string;
+  failed_service?: string;
+}
+
+export interface AnalysisStage {
+  id: string;
+  label: string;
+  status: 'pending' | 'active' | 'completed' | 'error';
+  progress?: number;
+}
+
+// Engineering Historian Timeline Types
+export interface TimelineEvent {
+  timestamp: string;
+  title: string;
+  description: string;
+  severity: "low" | "medium" | "high" | "critical";
+  affected_services: string[];
+  engineering_decision: string;
+  operational_impact: string;
+  confidence_score: number;
+}
+
+export interface HiddenRisk {
+  title: string;
+  description: string;
+  why_hidden: string;
+  blast_radius: string;
+  estimated_impact: string;
+  detection_difficulty: string;
+}
+
+export interface ExecutiveSummary {
+  reliability_maturity_score: number;
+  maturity_level: string;
+  maturity_color: string;
+  risk_posture: string;
+  risk_posture_description: string;
+  most_dangerous_hidden_risk: HiddenRisk;
+  strategic_recommendation: string;
+  key_metrics: {
+    total_services_analyzed: number;
+    services_at_risk: number;
+    critical_risks_found: number;
+    estimated_time_to_incident: string;
+    blast_radius_score: number;
+    confidence_level: number;
+  };
+  organizational_risks: string[];
+  executive_summary: string;
+}
+
+export interface EngineeringTimelineData {
+  timeline: TimelineEvent[];
+  executive_summary: ExecutiveSummary;
+  metadata: {
+    generated_at: string;
+    repository: string;
+    failed_service: string;
+    total_events: number;
+    analysis_confidence: number;
+  };
+}
+
 // Made with Bob

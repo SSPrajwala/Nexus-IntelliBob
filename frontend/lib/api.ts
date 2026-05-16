@@ -180,6 +180,95 @@ export const api = {
       body: JSON.stringify(data),
     });
   },
+
+  // Analyze GitHub repository (complete intelligence analysis)
+  analyzeGithubRepository: async (data: {
+    repo_url: string;
+    failed_service?: string;
+  }): Promise<{
+    success: boolean;
+    message: string;
+    repository_metadata: {
+      owner: string;
+      repo_name: string;
+      url: string;
+      size_mb: number;
+      file_count: number;
+      detected_languages: Record<string, number>;
+      frameworks: string[];
+      estimated_service_count: number;
+    };
+    architecture_summary: {
+      summary: string;
+      services: Array<{
+        name: string;
+        path: string;
+        entry_point: string;
+        type: string;
+      }>;
+      databases: string[];
+      queues: string[];
+      external_integrations: string[];
+      complexity_score: number;
+      topology: {
+        total_services: number;
+        service_types: Record<string, number>;
+        architecture_pattern: string;
+        service_list: string[];
+      };
+    };
+    risk_summary: {
+      total_risks: number;
+      critical_risks: number;
+      high_risks: number;
+      medium_risks: number;
+      low_risks: number;
+      files_scanned: number;
+      top_risks: any[];
+    };
+    blast_radius: any;
+    premortem_report: any;
+    engineering_risk_profile: {
+      total_risks: number;
+      risks: Array<{
+        type: string;
+        severity: string;
+        description: string;
+      }>;
+      overall_risk_level: string;
+    };
+  }> => {
+    return fetchApi("/api/analyze-github-repo", {
+      method: "POST",
+      body: JSON.stringify(data),
+    });
+  },
+
+  // Generate engineering timeline
+  generateEngineeringTimeline: async (data: {
+    repo_path: string;
+    failed_service: string;
+  }): Promise<{
+    success: boolean;
+    message: string;
+    timeline?: Array<{
+      timestamp: string;
+      title: string;
+      description: string;
+      severity: "low" | "medium" | "high" | "critical";
+      affected_services: string[];
+      engineering_decision: string;
+      operational_impact: string;
+      confidence_score: number;
+    }>;
+    executive_summary?: any;
+    metadata?: any;
+  }> => {
+    return fetchApi("/api/engineering-timeline", {
+      method: "POST",
+      body: JSON.stringify(data),
+    });
+  },
 };
 
 // Safe API wrapper with fallback

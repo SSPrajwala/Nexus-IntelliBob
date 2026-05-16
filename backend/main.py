@@ -21,7 +21,9 @@ import dna_engine
 import risk_scanner
 import blast_analyzer
 import repo_ingestor
+import repo_analyzer
 import premortem_generator
+import historian
 
 
 @asynccontextmanager
@@ -656,6 +658,118 @@ async def generate_premortem_legacy(request: PreMortemRequest):
         return PreMortemResponse(
             success=False,
             message=f"Failed to generate pre-mortem: {str(e)}"
+        )
+
+
+@app.post("/api/engineering-timeline")
+async def generate_engineering_timeline_endpoint(request: dict):
+    """
+    Generate Engineering Historian Intelligence Timeline.
+    Combines repository scan, blast radius, and pre-mortem to create
+    a cinematic AI timeline showing system evolution and predicted incidents.
+    Supports both local paths and GitHub URLs.
+    """
+    try:
+        repo_path = request.get('repo_path', '').strip()
+        failed_service = request.get('failed_service', '').strip()
+        
+        # Validate inputs
+        if not repo_path:
+            raise HTTPException(
+                status_code=400,
+                detail="Repository path cannot be empty"
+            )
+        
+        if not failed_service:
+            raise HTTPException(
+                status_code=400,
+                detail="Failed service name cannot be empty"
+            )
+        
+        # Handle GitHub URLs
+        ingestor = repo_ingestor.RepoIngestor()
+        cleanup_needed = False
+        
+        if ingestor.is_github_url(repo_path):
+            success, local_path, error = ingestor.clone_repository(repo_path)
+            if not success:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"Failed to clone repository: {error}"
+                )
+            repo_path = local_path
+            cleanup_needed = True
+        else:
+            # Handle relative paths
+            if not os.path.isabs(repo_path):
+                repo_path = os.path.abspath(repo_path)
+        
+        # Validate repository exists
+        if not os.path.exists(repo_path):
+            raise HTTPException(
+                status_code=404,
+                detail=f"Repository not found: {repo_path}"
+            )
+        
+        try:
+            # Step 1: Scan repository for risks
+            scan_results = risk_scanner.scan_repository(repo_path)
+            
+            # Step 2: Compute blast radius
+            blast_results = blast_analyzer.analyze_blast_radius(repo_path, failed_service)
+            
+            # Step 3: Correlate with incident DNA
+            dna_matches = []
+            if scan_results.get('matches'):
+                for match in scan_results['matches'][:3]:
+                    if match.get('related_incident_pattern'):
+                        dna_matches.append({
+                            'pattern': match['related_incident_pattern'],
+                            'confidence': match.get('confidence', 0.7),
+                            'description': match.get('explanation', '')
+                        })
+            
+            # Step 4: Generate pre-mortem report
+            premortem_report = premortem_generator.generate_premortem(
+                scan_results,
+                blast_results,
+                dna_matches
+            )
+            
+            # Step 5: Generate engineering timeline
+            timeline_data = historian.generate_engineering_timeline(
+                scan_results,
+                blast_results,
+                premortem_report
+            )
+            
+            return {
+                "success": True,
+                "message": "Engineering timeline generated successfully",
+                "timeline": timeline_data['timeline'],
+                "executive_summary": timeline_data['executive_summary'],
+                "metadata": timeline_data['metadata']
+            }
+        
+        finally:
+            # Cleanup cloned repository if needed
+            if cleanup_needed:
+                try:
+                    ingestor.cleanup_repository(repo_path)
+                except Exception as cleanup_error:
+                    print(f"Warning: Failed to cleanup repository: {cleanup_error}")
+        
+    except HTTPException:
+        raise
+    except ValueError as ve:
+        raise HTTPException(
+            status_code=400,
+            detail=str(ve)
+        )
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to generate engineering timeline: {str(e)}"
         )
 
 
