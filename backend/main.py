@@ -24,6 +24,20 @@ import repo_ingestor
 import repo_analyzer
 import premortem_generator
 import historian
+import system_validator
+
+# Import centralized path manager
+from core.path_manager import (
+    resolve_repo_path,
+    is_github_url,
+    generate_temp_repo_path,
+    get_temp_manager,
+    DEMO_REPOS_DIR
+)
+
+# Import analysis pipeline and service detection
+from services.analysis_pipeline import analyze_github_repository
+from services.service_detector import get_service_summary
 
 
 @asynccontextmanager
@@ -63,6 +77,141 @@ async def health_check():
         timestamp=datetime.utcnow(),
         version="1.0.0"
     )
+
+
+@app.get("/api/system-health")
+async def system_health_check():
+    """
+    System health validation endpoint.
+    Checks paths, dependencies, Git availability, and system configuration.
+    """
+    try:
+        validation_result = system_validator.validate_system()
+        return validation_result
+    except Exception as e:
+        return {
+            "status": "error",
+            "checks": [],
+            "warnings": [],
+            "errors": [f"System validation failed: {str(e)}"],
+            "paths": {},
+            "summary": {
+                "total_checks": 0,
+                "passed": 0,
+                "failed": 1,
+                "warnings_count": 0,
+                "errors_count": 1
+            }
+        }
+
+
+@app.post("/api/analyze-github-repo")
+async def analyze_github_repo_endpoint(request: dict):
+    """
+    Complete GitHub repository intelligence analysis.
+    This is the MAIN orchestration endpoint that keeps temp repos alive
+    throughout the entire analysis pipeline.
+    
+    Supports both GitHub URLs and local paths.
+    """
+    try:
+        repo_url = request.get('repo_url', '').strip()
+        failed_service = request.get('failed_service', '').strip() or None
+        
+        # Validate input
+        if not repo_url:
+            raise HTTPException(
+                status_code=400,
+                detail="Repository URL cannot be empty"
+            )
+        
+        # Run complete analysis pipeline
+        # The pipeline manages temp repo lifecycle internally
+        result = analyze_github_repository(repo_url, failed_service)
+        
+        if not result.get('success'):
+            raise HTTPException(
+                status_code=400,
+                detail=result.get('message', 'Analysis failed')
+            )
+        
+        return result
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to analyze repository: {str(e)}"
+        )
+
+
+@app.post("/api/detect-services")
+async def detect_services_endpoint(request: dict):
+    """
+    Dynamically detect services/components in a repository.
+    Works for ANY repository structure - microservices, monoliths, or hybrid.
+    
+    Returns list of detected services with auto-selection for analysis.
+    """
+    temp_manager = get_temp_manager()
+    cloned_repo_path = None
+    
+    try:
+        repo_path = request.get('repo_path', '').strip()
+        
+        # Validate input
+        if not repo_path:
+            raise HTTPException(
+                status_code=400,
+                detail="Repository path cannot be empty"
+            )
+        
+        # Handle GitHub URLs
+        if is_github_url(repo_path):
+            ingestor = repo_ingestor.RepoIngestor()
+            success, local_path, error = ingestor.clone_repository(repo_path)
+            if not success:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"Failed to clone repository: {error}"
+                )
+            cloned_repo_path = local_path
+            temp_manager.track(local_path)
+            repo_path = local_path
+        else:
+            # Resolve local path
+            try:
+                resolved_path = resolve_repo_path(repo_path)
+                if resolved_path is None:
+                    raise ValueError("Invalid repository path")
+                repo_path = str(resolved_path)
+            except ValueError as ve:
+                raise HTTPException(
+                    status_code=404,
+                    detail=str(ve)
+                )
+        
+        # Detect services
+        service_summary = get_service_summary(repo_path)
+        
+        return {
+            "success": True,
+            "message": f"Detected {service_summary['total_services']} services/components",
+            **service_summary
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to detect services: {str(e)}"
+        )
+    finally:
+        # Cleanup cloned repository if needed
+        if cloned_repo_path:
+            temp_manager.cleanup(cloned_repo_path, ignore_errors=True)
 
 
 @app.get("/api/dashboard-stats", response_model=DashboardStats)
@@ -385,6 +534,9 @@ async def compute_blast_radius(request: ComputeBlastRadiusRequest):
     Analyzes service dependencies and simulates cascading failures.
     Supports both local paths and GitHub URLs.
     """
+    temp_manager = get_temp_manager()
+    cloned_repo_path = None
+    
     try:
         repo_path = request.repo_path.strip()
         failed_service = request.failed_service.strip()
@@ -403,27 +555,30 @@ async def compute_blast_radius(request: ComputeBlastRadiusRequest):
             )
         
         # Check if it's a GitHub URL
-        ingestor = repo_ingestor.RepoIngestor()
-        if ingestor.is_github_url(repo_path):
-            # Clone the repository
+        if is_github_url(repo_path):
+            # Clone the repository to temp location
+            ingestor = repo_ingestor.RepoIngestor()
             success, local_path, error = ingestor.clone_repository(repo_path)
             if not success:
                 raise HTTPException(
                     status_code=400,
                     detail=f"Failed to clone repository: {error}"
                 )
+            cloned_repo_path = local_path
+            temp_manager.track(local_path)
             repo_path = local_path
         else:
-            # Handle relative paths
-            if not os.path.isabs(repo_path):
-                repo_path = os.path.abspath(repo_path)
-        
-        # Validate repository exists
-        if not os.path.exists(repo_path):
-            raise HTTPException(
-                status_code=404,
-                detail=f"Repository not found: {repo_path}"
-            )
+            # Resolve local path using centralized manager
+            try:
+                resolved_path = resolve_repo_path(repo_path)
+                if resolved_path is None:
+                    raise ValueError("Invalid repository path")
+                repo_path = str(resolved_path)
+            except ValueError as ve:
+                raise HTTPException(
+                    status_code=404,
+                    detail=str(ve)
+                )
         
         # Analyze blast radius
         result = blast_analyzer.analyze_blast_radius(repo_path, failed_service)
@@ -454,6 +609,10 @@ async def compute_blast_radius(request: ComputeBlastRadiusRequest):
             status_code=500,
             detail=f"Failed to compute blast radius: {str(e)}"
         )
+    finally:
+        # Cleanup cloned repository if needed
+        if cloned_repo_path:
+            temp_manager.cleanup(cloned_repo_path, ignore_errors=True)
 
 
 @app.post("/api/blast-radius-legacy", response_model=BlastRadiusResponse)
@@ -517,6 +676,9 @@ async def generate_premortem_intelligence(request: dict):
     Combines repository scan, blast radius, and incident DNA correlation.
     Supports both local paths and GitHub URLs.
     """
+    temp_manager = get_temp_manager()
+    cloned_repo_path = None
+    
     try:
         repo_path = request.get('repo_path', '').strip()
         failed_service = request.get('failed_service', '').strip()
@@ -535,69 +697,60 @@ async def generate_premortem_intelligence(request: dict):
             )
         
         # Handle GitHub URLs
-        ingestor = repo_ingestor.RepoIngestor()
-        cleanup_needed = False
-        
-        if ingestor.is_github_url(repo_path):
+        if is_github_url(repo_path):
+            ingestor = repo_ingestor.RepoIngestor()
             success, local_path, error = ingestor.clone_repository(repo_path)
             if not success:
                 raise HTTPException(
                     status_code=400,
                     detail=f"Failed to clone repository: {error}"
                 )
+            cloned_repo_path = local_path
+            temp_manager.track(local_path)
             repo_path = local_path
-            cleanup_needed = True
         else:
-            # Handle relative paths
-            if not os.path.isabs(repo_path):
-                repo_path = os.path.abspath(repo_path)
+            # Resolve local path using centralized manager
+            try:
+                resolved_path = resolve_repo_path(repo_path)
+                if resolved_path is None:
+                    raise ValueError("Invalid repository path")
+                repo_path = str(resolved_path)
+            except ValueError as ve:
+                raise HTTPException(
+                    status_code=404,
+                    detail=str(ve)
+                )
         
-        # Validate repository exists
-        if not os.path.exists(repo_path):
-            raise HTTPException(
-                status_code=404,
-                detail=f"Repository not found: {repo_path}"
-            )
+        # Step 1: Scan repository for risks
+        scan_results = risk_scanner.scan_repository(repo_path)
         
-        try:
-            # Step 1: Scan repository for risks
-            scan_results = risk_scanner.scan_repository(repo_path)
-            
-            # Step 2: Compute blast radius
-            blast_results = blast_analyzer.analyze_blast_radius(repo_path, failed_service)
-            
-            # Step 3: Correlate with incident DNA (get similar patterns)
-            dna_matches = []
-            if scan_results.get('matches'):
-                # Get related incident patterns from the first few high-severity risks
-                for match in scan_results['matches'][:3]:
-                    if match.get('related_incident_pattern'):
-                        dna_matches.append({
-                            'pattern': match['related_incident_pattern'],
-                            'confidence': match.get('confidence', 0.7),
-                            'description': match.get('explanation', '')
-                        })
-            
-            # Step 4: Generate pre-mortem report
-            premortem_report = premortem_generator.generate_premortem(
-                scan_results,
-                blast_results,
-                dna_matches
-            )
-            
-            return {
-                "success": True,
-                "message": "Pre-mortem intelligence report generated successfully",
-                "report": premortem_report
-            }
+        # Step 2: Compute blast radius
+        blast_results = blast_analyzer.analyze_blast_radius(repo_path, failed_service)
         
-        finally:
-            # Cleanup cloned repository if needed
-            if cleanup_needed:
-                try:
-                    ingestor.cleanup_repository(repo_path)
-                except Exception as cleanup_error:
-                    print(f"Warning: Failed to cleanup repository: {cleanup_error}")
+        # Step 3: Correlate with incident DNA (get similar patterns)
+        dna_matches = []
+        if scan_results.get('matches'):
+            # Get related incident patterns from the first few high-severity risks
+            for match in scan_results['matches'][:3]:
+                if match.get('related_incident_pattern'):
+                    dna_matches.append({
+                        'pattern': match['related_incident_pattern'],
+                        'confidence': match.get('confidence', 0.7),
+                        'description': match.get('explanation', '')
+                    })
+        
+        # Step 4: Generate pre-mortem report
+        premortem_report = premortem_generator.generate_premortem(
+            scan_results,
+            blast_results,
+            dna_matches
+        )
+        
+        return {
+            "success": True,
+            "message": "Pre-mortem intelligence report generated successfully",
+            "report": premortem_report
+        }
         
     except HTTPException:
         raise
@@ -611,6 +764,10 @@ async def generate_premortem_intelligence(request: dict):
             status_code=500,
             detail=f"Failed to generate pre-mortem: {str(e)}"
         )
+    finally:
+        # Cleanup cloned repository if needed
+        if cloned_repo_path:
+            temp_manager.cleanup(cloned_repo_path, ignore_errors=True)
 
 
 @app.post("/api/premortem-legacy", response_model=PreMortemResponse)
@@ -669,6 +826,9 @@ async def generate_engineering_timeline_endpoint(request: dict):
     a cinematic AI timeline showing system evolution and predicted incidents.
     Supports both local paths and GitHub URLs.
     """
+    temp_manager = get_temp_manager()
+    cloned_repo_path = None
+    
     try:
         repo_path = request.get('repo_path', '').strip()
         failed_service = request.get('failed_service', '').strip()
@@ -687,77 +847,68 @@ async def generate_engineering_timeline_endpoint(request: dict):
             )
         
         # Handle GitHub URLs
-        ingestor = repo_ingestor.RepoIngestor()
-        cleanup_needed = False
-        
-        if ingestor.is_github_url(repo_path):
+        if is_github_url(repo_path):
+            ingestor = repo_ingestor.RepoIngestor()
             success, local_path, error = ingestor.clone_repository(repo_path)
             if not success:
                 raise HTTPException(
                     status_code=400,
                     detail=f"Failed to clone repository: {error}"
                 )
+            cloned_repo_path = local_path
+            temp_manager.track(local_path)
             repo_path = local_path
-            cleanup_needed = True
         else:
-            # Handle relative paths
-            if not os.path.isabs(repo_path):
-                repo_path = os.path.abspath(repo_path)
+            # Resolve local path using centralized manager
+            try:
+                resolved_path = resolve_repo_path(repo_path)
+                if resolved_path is None:
+                    raise ValueError("Invalid repository path")
+                repo_path = str(resolved_path)
+            except ValueError as ve:
+                raise HTTPException(
+                    status_code=404,
+                    detail=str(ve)
+                )
         
-        # Validate repository exists
-        if not os.path.exists(repo_path):
-            raise HTTPException(
-                status_code=404,
-                detail=f"Repository not found: {repo_path}"
-            )
+        # Step 1: Scan repository for risks
+        scan_results = risk_scanner.scan_repository(repo_path)
         
-        try:
-            # Step 1: Scan repository for risks
-            scan_results = risk_scanner.scan_repository(repo_path)
-            
-            # Step 2: Compute blast radius
-            blast_results = blast_analyzer.analyze_blast_radius(repo_path, failed_service)
-            
-            # Step 3: Correlate with incident DNA
-            dna_matches = []
-            if scan_results.get('matches'):
-                for match in scan_results['matches'][:3]:
-                    if match.get('related_incident_pattern'):
-                        dna_matches.append({
-                            'pattern': match['related_incident_pattern'],
-                            'confidence': match.get('confidence', 0.7),
-                            'description': match.get('explanation', '')
-                        })
-            
-            # Step 4: Generate pre-mortem report
-            premortem_report = premortem_generator.generate_premortem(
-                scan_results,
-                blast_results,
-                dna_matches
-            )
-            
-            # Step 5: Generate engineering timeline
-            timeline_data = historian.generate_engineering_timeline(
-                scan_results,
-                blast_results,
-                premortem_report
-            )
-            
-            return {
-                "success": True,
-                "message": "Engineering timeline generated successfully",
-                "timeline": timeline_data['timeline'],
-                "executive_summary": timeline_data['executive_summary'],
-                "metadata": timeline_data['metadata']
-            }
+        # Step 2: Compute blast radius
+        blast_results = blast_analyzer.analyze_blast_radius(repo_path, failed_service)
         
-        finally:
-            # Cleanup cloned repository if needed
-            if cleanup_needed:
-                try:
-                    ingestor.cleanup_repository(repo_path)
-                except Exception as cleanup_error:
-                    print(f"Warning: Failed to cleanup repository: {cleanup_error}")
+        # Step 3: Correlate with incident DNA
+        dna_matches = []
+        if scan_results.get('matches'):
+            for match in scan_results['matches'][:3]:
+                if match.get('related_incident_pattern'):
+                    dna_matches.append({
+                        'pattern': match['related_incident_pattern'],
+                        'confidence': match.get('confidence', 0.7),
+                        'description': match.get('explanation', '')
+                    })
+        
+        # Step 4: Generate pre-mortem report
+        premortem_report = premortem_generator.generate_premortem(
+            scan_results,
+            blast_results,
+            dna_matches
+        )
+        
+        # Step 5: Generate engineering timeline
+        timeline_data = historian.generate_engineering_timeline(
+            scan_results,
+            blast_results,
+            premortem_report
+        )
+        
+        return {
+            "success": True,
+            "message": "Engineering timeline generated successfully",
+            "timeline": timeline_data['timeline'],
+            "executive_summary": timeline_data['executive_summary'],
+            "metadata": timeline_data['metadata']
+        }
         
     except HTTPException:
         raise
@@ -771,6 +922,10 @@ async def generate_engineering_timeline_endpoint(request: dict):
             status_code=500,
             detail=f"Failed to generate engineering timeline: {str(e)}"
         )
+    finally:
+        # Cleanup cloned repository if needed
+        if cloned_repo_path:
+            temp_manager.cleanup(cloned_repo_path, ignore_errors=True)
 
 
 if __name__ == "__main__":

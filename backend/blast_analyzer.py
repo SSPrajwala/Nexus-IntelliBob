@@ -9,6 +9,12 @@ from dataclasses import dataclass
 from pathlib import Path
 import logging
 
+# Import centralized path manager
+from core.path_manager import resolve_repo_path, get_relative_path
+
+# Import dynamic service detector
+from services.service_detector import ServiceDetector
+
 logger = logging.getLogger(__name__)
 
 
@@ -68,6 +74,7 @@ class BlastAnalyzer:
     def analyze_repository(self, repo_path: str) -> Dict[str, ServiceNode]:
         """
         Analyze a repository to build service dependency graph
+        Uses dynamic service detection to work with ANY repository structure
         
         Args:
             repo_path: Path to repository root
@@ -77,15 +84,40 @@ class BlastAnalyzer:
         """
         logger.info(f"Analyzing repository: {repo_path}")
         
-        # Discover services
-        services = self._discover_services(repo_path)
+        # Use dynamic service detector
+        detector = ServiceDetector(repo_path)
+        detected_services = detector.detect_services()
+        
+        if not detected_services:
+            logger.warning(f"No services detected in {repo_path}")
+            return {}
+        
+        # Convert detected services to our format
+        services = {}
+        for svc in detected_services:
+            services[svc['name']] = svc['path']
+        
+        logger.info(f"Detected {len(services)} services/components")
         
         # Analyze dependencies for each service
         for service_name, service_path in services.items():
             dependencies = self._analyze_service_dependencies(service_path, services)
             
-            # Determine criticality based on service type
-            criticality = self._determine_criticality(service_name, dependencies)
+            # Get criticality from detector or determine it
+            detected_svc = next((s for s in detected_services if s['name'] == service_name), None)
+            if detected_svc and 'criticality_score' in detected_svc:
+                # Map score to criticality level
+                score = detected_svc['criticality_score']
+                if score >= 80:
+                    criticality = 'critical'
+                elif score >= 60:
+                    criticality = 'high'
+                elif score >= 40:
+                    criticality = 'medium'
+                else:
+                    criticality = 'low'
+            else:
+                criticality = self._determine_criticality(service_name, dependencies)
             
             self.services[service_name] = ServiceNode(
                 name=service_name,
@@ -101,21 +133,8 @@ class BlastAnalyzer:
                 if dep in self.services:
                     self.services[dep].dependents.add(service_name)
         
-        logger.info(f"Discovered {len(self.services)} services")
+        logger.info(f"Built dependency graph with {len(self.services)} nodes")
         return self.services
-    
-    def _discover_services(self, repo_path: str) -> Dict[str, str]:
-        """Discover services in repository"""
-        services = {}
-        
-        # Look for service directories
-        if os.path.exists(repo_path):
-            for item in os.listdir(repo_path):
-                item_path = os.path.join(repo_path, item)
-                if os.path.isdir(item_path) and item.endswith('-service'):
-                    services[item] = item_path
-        
-        return services
     
     def _analyze_service_dependencies(self, service_path: str, all_services: Dict[str, str]) -> Set[str]:
         """Analyze dependencies for a single service"""
@@ -164,20 +183,22 @@ class BlastAnalyzer:
         """Determine service criticality based on name and dependencies"""
         service_lower = service_name.lower()
         
-        # Critical services
-        if 'auth' in service_lower:
-            return 'critical'
-        if 'payment' in service_lower:
+        # Critical services (common patterns)
+        critical_keywords = ['auth', 'payment', 'security', 'gateway', 'api', 'core']
+        if any(keyword in service_lower for keyword in critical_keywords):
             return 'critical'
         
         # High criticality
-        if 'order' in service_lower:
-            return 'high'
-        if len(dependencies) > 2:
+        high_keywords = ['order', 'user', 'account', 'transaction', 'billing']
+        if any(keyword in service_lower for keyword in high_keywords):
             return 'high'
         
-        # Medium criticality
-        if len(dependencies) > 0:
+        # Based on dependency count
+        if len(dependencies) > 3:
+            return 'high'
+        elif len(dependencies) > 1:
+            return 'medium'
+        elif len(dependencies) > 0:
             return 'medium'
         
         return 'low'
@@ -276,92 +297,160 @@ class BlastAnalyzer:
             return "partial_degradation"
     
     def _get_failure_description(self, affected_service: str, root_service: str) -> str:
-        """Generate failure description"""
-        service_type = affected_service.replace('-service', '').title()
-        root_type = root_service.replace('-service', '').title()
+        """Generate failure description - works for any service name"""
+        # Clean up service names for display
+        affected_clean = affected_service.replace('-service', '').replace('_', ' ').replace('-', ' ').title()
+        root_clean = root_service.replace('-service', '').replace('_', ' ').replace('-', ' ').title()
         
-        descriptions = {
-            'auth-service': f"{service_type} authentication validation failures due to {root_type} outage",
-            'payment-service': f"{service_type} transaction processing blocked by {root_type} failure",
-            'order-service': f"{service_type} processing degraded due to {root_type} unavailability"
-        }
+        # Generate contextual description based on service type
+        service_lower = affected_service.lower()
         
-        return descriptions.get(affected_service, f"{service_type} impacted by {root_type} failure")
+        if 'auth' in service_lower:
+            return f"{affected_clean} authentication validation failures due to {root_clean} outage"
+        elif 'payment' in service_lower:
+            return f"{affected_clean} transaction processing blocked by {root_clean} failure"
+        elif 'order' in service_lower:
+            return f"{affected_clean} processing degraded due to {root_clean} unavailability"
+        elif 'api' in service_lower or 'gateway' in service_lower:
+            return f"{affected_clean} requests failing due to {root_clean} dependency failure"
+        elif 'database' in service_lower or 'db' in service_lower:
+            return f"{affected_clean} data access blocked by {root_clean} outage"
+        else:
+            return f"{affected_clean} impacted by {root_clean} failure"
     
     def _determine_failure_type(self, failed_service: str, affected_services: List[str]) -> str:
-        """Determine the type of failure"""
-        if failed_service == 'auth-service':
+        """Determine the type of failure - works for any service"""
+        service_lower = failed_service.lower()
+        
+        # Determine based on service type
+        if 'auth' in service_lower:
             return "authentication_cascade"
-        elif failed_service == 'payment-service':
+        elif 'payment' in service_lower:
             return "payment_outage"
-        elif len(affected_services) >= 2:
+        elif 'api' in service_lower or 'gateway' in service_lower:
+            return "api_gateway_failure"
+        elif 'database' in service_lower or 'db' in service_lower:
+            return "data_layer_failure"
+        elif len(affected_services) >= 3:
             return "platform_wide_outage"
+        elif len(affected_services) >= 1:
+            return "cascading_failure"
         else:
             return "service_degradation"
     
     def _compute_criticality_score(self, failed_service: str, affected_services: List[str]) -> int:
-        """Compute criticality score (0-100)"""
-        base_score = 0
+        """Compute criticality score (0-100) - works for any service"""
+        service_lower = failed_service.lower()
         
-        # Base score from failed service
-        if failed_service == 'auth-service':
+        # Base score from failed service type
+        if 'auth' in service_lower or 'security' in service_lower:
             base_score = 95
-        elif failed_service == 'payment-service':
+        elif 'payment' in service_lower or 'billing' in service_lower:
             base_score = 90
-        elif failed_service == 'order-service':
+        elif 'api' in service_lower or 'gateway' in service_lower:
+            base_score = 85
+        elif 'database' in service_lower or 'db' in service_lower:
+            base_score = 80
+        elif 'order' in service_lower or 'transaction' in service_lower:
             base_score = 75
+        elif 'user' in service_lower or 'account' in service_lower:
+            base_score = 70
         else:
-            base_score = 50
+            # Default based on service criticality if available
+            if failed_service in self.services:
+                criticality = self.services[failed_service].criticality
+                if criticality == 'critical':
+                    base_score = 85
+                elif criticality == 'high':
+                    base_score = 70
+                elif criticality == 'medium':
+                    base_score = 55
+                else:
+                    base_score = 40
+            else:
+                base_score = 50
         
-        # Add points for affected services
-        affected_score = len(affected_services) * 10
+        # Add points for affected services (each adds impact)
+        affected_score = len(affected_services) * 8
         
         # Cap at 100
         return min(base_score + affected_score, 100)
     
     def _estimate_customer_impact(self, failed_service: str, affected_services: List[str]) -> str:
-        """Estimate customer impact"""
+        """Estimate customer impact - works for any service"""
         total_affected = len(affected_services) + 1
+        service_lower = failed_service.lower()
         
-        if failed_service == 'auth-service' or total_affected >= 3:
+        # Critical impact scenarios
+        if 'auth' in service_lower or 'security' in service_lower:
             return "Complete platform unavailability - All users unable to access services"
-        elif failed_service == 'payment-service':
+        elif total_affected >= 4:
+            return "Severe - Platform-wide outage affecting all major functionalities"
+        elif 'payment' in service_lower or 'billing' in service_lower:
             return "Critical - All payment transactions blocked, orders cannot be completed"
+        elif 'api' in service_lower or 'gateway' in service_lower:
+            return "Critical - API gateway failure blocking all external integrations"
+        elif 'database' in service_lower or 'db' in service_lower:
+            return "Critical - Data layer failure causing widespread service disruption"
         elif total_affected >= 2:
             return "High - Major service degradation affecting core user workflows"
         else:
             return "Medium - Partial service degradation with workarounds available"
     
     def _estimate_revenue_risk(self, failed_service: str, affected_services: List[str]) -> str:
-        """Estimate revenue risk"""
+        """Estimate revenue risk - works for any service"""
         total_affected = len(affected_services) + 1
+        service_lower = failed_service.lower()
         
-        if failed_service == 'auth-service' or total_affected >= 3:
+        # High revenue risk scenarios
+        if 'auth' in service_lower or 'security' in service_lower:
             return "$2.4M/hour - Complete transaction halt"
-        elif failed_service == 'payment-service':
+        elif total_affected >= 4:
+            return "$2.0M/hour - Platform-wide outage"
+        elif 'payment' in service_lower or 'billing' in service_lower:
             return "$1.8M/hour - Payment processing blocked"
+        elif 'api' in service_lower or 'gateway' in service_lower:
+            return "$1.5M/hour - API gateway failure blocking integrations"
+        elif 'order' in service_lower or 'transaction' in service_lower:
+            return "$1.2M/hour - Order processing disrupted"
         elif total_affected >= 2:
             return "$850K/hour - Degraded transaction capacity"
         else:
             return "$200K/hour - Partial service impact"
     
     def _generate_recommendations(self, failed_service: str, affected_services: List[str]) -> List[str]:
-        """Generate containment recommendations"""
+        """Generate containment recommendations - works for any service"""
         recommendations = []
+        service_lower = failed_service.lower()
         
-        if failed_service == 'auth-service':
+        # Service-specific recommendations
+        if 'auth' in service_lower or 'security' in service_lower:
             recommendations.extend([
                 "Implement circuit breaker on auth service dependencies",
                 "Enable cached authentication tokens with extended TTL",
                 "Deploy read-only mode for non-critical operations",
                 "Activate emergency authentication bypass for critical services"
             ])
-        elif failed_service == 'payment-service':
+        elif 'payment' in service_lower or 'billing' in service_lower:
             recommendations.extend([
                 "Queue payment requests for retry when service recovers",
                 "Enable alternative payment gateway failover",
                 "Implement graceful degradation for order processing",
                 "Notify customers of payment processing delays"
+            ])
+        elif 'api' in service_lower or 'gateway' in service_lower:
+            recommendations.extend([
+                "Route traffic to backup API gateway instances",
+                "Enable API request queuing and retry logic",
+                "Activate rate limiting to protect recovering services",
+                "Notify integration partners of service degradation"
+            ])
+        elif 'database' in service_lower or 'db' in service_lower:
+            recommendations.extend([
+                "Failover to read replicas for read operations",
+                "Enable database connection pooling limits",
+                "Implement query caching for frequently accessed data",
+                "Prepare for potential data consistency issues"
             ])
         else:
             recommendations.extend([
@@ -371,11 +460,18 @@ class BlastAnalyzer:
                 "Implement graceful degradation patterns"
             ])
         
-        # Add general recommendations
+        # Add general recommendations based on impact
+        if len(affected_services) >= 2:
+            recommendations.extend([
+                "Activate full incident response team",
+                "Prepare customer communication plan",
+                "Consider emergency maintenance window"
+            ])
+        
         recommendations.extend([
             "Monitor dependent service health metrics",
             "Prepare rollback procedures",
-            "Activate incident response team"
+            "Document incident timeline for post-mortem"
         ])
         
         return recommendations
@@ -418,16 +514,21 @@ def analyze_blast_radius(repo_path: str, failed_service: str) -> Dict:
     Main entry point for blast radius analysis
     
     Args:
-        repo_path: Path to repository
+        repo_path: Path to repository (will be resolved using centralized path manager)
         failed_service: Name of failed service
         
     Returns:
         Dictionary with blast radius analysis
     """
+    # Resolve repository path using centralized manager
+    resolved_path = resolve_repo_path(repo_path)
+    if resolved_path is None:
+        raise ValueError(f"GitHub URLs not supported in analyze_blast_radius. Please clone first.")
+    
     analyzer = BlastAnalyzer()
     
-    # Analyze repository
-    analyzer.analyze_repository(repo_path)
+    # Analyze repository with resolved path
+    analyzer.analyze_repository(str(resolved_path))
     
     # Compute blast radius
     result = analyzer.compute_blast_radius(failed_service)

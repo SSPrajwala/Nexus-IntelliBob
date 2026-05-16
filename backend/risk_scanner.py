@@ -11,8 +11,8 @@ from pathlib import Path
 from dataclasses import dataclass
 import hashlib
 
-# Project root directory (parent of backend/)
-BASE_DIR = Path(__file__).resolve().parent.parent
+# Import centralized path manager
+from core.path_manager import resolve_repo_path, get_relative_path, PROJECT_ROOT
 
 
 @dataclass
@@ -284,54 +284,6 @@ def scan_file(file_path: str, repo_root: str) -> List[RiskMatch]:
     return risks
 
 
-def _resolve_repo_path(repo_path: str) -> Path:
-    """
-    Resolve repository path to absolute path, supporting both relative and absolute paths.
-    
-    Args:
-        repo_path: Repository path (relative or absolute)
-        
-    Returns:
-        Resolved absolute Path object
-        
-    Raises:
-        ValueError: If path is invalid or doesn't exist
-    """
-    # Validate input
-    if not repo_path or not repo_path.strip():
-        raise ValueError("Repository path cannot be empty")
-    
-    # Convert to Path object
-    path = Path(repo_path)
-    
-    # If it's already absolute and exists, use it
-    if path.is_absolute():
-        if not path.exists():
-            raise ValueError(f"Repository path does not exist: {repo_path}")
-        if not path.is_dir():
-            raise ValueError(f"Path is not a directory: {repo_path}")
-        return path.resolve()
-    
-    # Try resolving relative to project root (BASE_DIR)
-    resolved_path = (BASE_DIR / path).resolve()
-    if resolved_path.exists() and resolved_path.is_dir():
-        return resolved_path
-    
-    # Try resolving relative to current working directory
-    cwd_path = (Path.cwd() / path).resolve()
-    if cwd_path.exists() and cwd_path.is_dir():
-        return cwd_path
-    
-    # Path not found
-    raise ValueError(
-        f"Repository path not found: {repo_path}\n"
-        f"Tried:\n"
-        f"  - Absolute: {path}\n"
-        f"  - Relative to project: {resolved_path}\n"
-        f"  - Relative to CWD: {cwd_path}"
-    )
-
-
 def scan_repository(repo_path: str) -> Dict:
     """
     Scan entire repository for architectural risk patterns
@@ -345,8 +297,29 @@ def scan_repository(repo_path: str) -> Dict:
     Raises:
         ValueError: If repository path is invalid or inaccessible
     """
+    # For GitHub URLs, we need to handle them specially
+    from core.path_manager import is_github_url, get_temp_manager
+    import repo_ingestor
+    
+    temp_manager = get_temp_manager()
+    cloned_repo_path = None
+    
     try:
-        repo_root = _resolve_repo_path(repo_path)
+        if is_github_url(repo_path):
+            # Clone GitHub repository
+            ingestor = repo_ingestor.RepoIngestor()
+            success, local_path, error = ingestor.clone_repository(repo_path)
+            if not success:
+                raise ValueError(f"Failed to clone repository: {error}")
+            
+            cloned_repo_path = local_path
+            temp_manager.track(local_path)
+            repo_root = Path(local_path)
+        else:
+            # Resolve local path
+            repo_root = resolve_repo_path(repo_path)
+            if repo_root is None:
+                raise ValueError(f"Invalid repository path: {repo_path}")
     except ValueError as e:
         raise ValueError(str(e))
     
@@ -395,7 +368,7 @@ def scan_repository(repo_path: str) -> Dict:
             "blast_radius_score": risk.blast_radius_score
         })
     
-    return {
+    result = {
         "repository": repo_path,
         "total_files_scanned": files_scanned,
         "total_risks": len(all_risks),
@@ -405,6 +378,12 @@ def scan_repository(repo_path: str) -> Dict:
         "low_risks": severity_counts["low"],
         "matches": risk_dicts
     }
+    
+    # Cleanup cloned repository if needed
+    if cloned_repo_path:
+        temp_manager.cleanup(cloned_repo_path, ignore_errors=True)
+    
+    return result
 
 
 # Made with Bob

@@ -13,8 +13,9 @@ import random
 
 
 def _generate_incident_title(failed_service: str, pattern_type: str) -> str:
-    """Generate realistic incident title"""
-    service_name = failed_service.replace('-service', '').title()
+    """Generate realistic incident title - works for any service name"""
+    # Clean up service name for display
+    service_name = failed_service.replace('-service', '').replace('_', ' ').replace('-', ' ').title()
     
     titles = {
         "RETRY_STORM": f"Cascading Retry Storm in {service_name} Under Load",
@@ -23,16 +24,20 @@ def _generate_incident_title(failed_service: str, pattern_type: str) -> str:
         "MISSING_TIMEOUT": f"{service_name} Hanging Requests Causing Degradation",
         "SMALL_CONNECTION_POOL": f"{service_name} Database Bottleneck Under Traffic Spike",
         "HARDCODED_SECRET": f"Authentication Failure in {service_name} Post-Rotation",
-        "MISSING_CIRCUIT_BREAKER": f"{service_name} Cascading Failure Without Circuit Protection"
+        "MISSING_CIRCUIT_BREAKER": f"{service_name} Cascading Failure Without Circuit Protection",
+        "MEMORY_LEAK": f"Memory Leak in {service_name} Causing Gradual Degradation",
+        "RACE_CONDITION": f"Race Condition in {service_name} Under Concurrent Load",
+        "DEADLOCK": f"Database Deadlock in {service_name} Transaction Processing"
     }
     
     return titles.get(pattern_type, f"Critical Failure in {service_name}")
 
 
-def _generate_executive_summary(failed_service: str, affected_services: List[str], 
+def _generate_executive_summary(failed_service: str, affected_services: List[str],
                                  primary_risk: Dict, criticality_score: int) -> str:
-    """Generate executive summary"""
-    service_name = failed_service.replace('-service', '').title()
+    """Generate executive summary - works for any service name"""
+    # Clean up service name for display
+    service_name = failed_service.replace('-service', '').replace('_', ' ').replace('-', ' ').title()
     affected_count = len(affected_services)
     
     severity_desc = "CRITICAL" if criticality_score >= 90 else "HIGH" if criticality_score >= 70 else "MEDIUM"
@@ -49,10 +54,11 @@ def _generate_executive_summary(failed_service: str, affected_services: List[str
     return summary
 
 
-def _generate_failure_scenario(failed_service: str, primary_risk: Dict, 
+def _generate_failure_scenario(failed_service: str, primary_risk: Dict,
                                 propagation_chain: List[Dict]) -> str:
-    """Generate detailed failure scenario"""
-    service_name = failed_service.replace('-service', '').title()
+    """Generate detailed failure scenario - works for any service name"""
+    # Clean up service name for display
+    service_name = failed_service.replace('-service', '').replace('_', ' ').replace('-', ' ').title()
     risk_type = primary_risk.get('risk_type', 'UNKNOWN')
     
     scenarios = {
@@ -85,10 +91,25 @@ def _generate_failure_scenario(failed_service: str, primary_risk: Dict,
             f"During security incident or scheduled rotation, service authentication fails "
             f"immediately. Manual code deployment required for recovery, extending outage "
             f"duration to 30-60 minutes minimum."
+        ),
+        "MEMORY_LEAK": (
+            f"{service_name} exhibits gradual memory consumption increase without proper garbage collection. "
+            f"Under sustained load, heap memory exhausts after 4-6 hours, triggering OutOfMemory errors. "
+            f"Service becomes unresponsive, requiring restart. Pattern repeats cyclically."
+        ),
+        "RACE_CONDITION": (
+            f"Concurrent request processing in {service_name} exposes race condition in shared state management. "
+            f"Under high concurrency, data corruption occurs intermittently. Symptoms include inconsistent "
+            f"responses and data integrity violations. Issue amplifies with traffic volume."
+        ),
+        "DEADLOCK": (
+            f"Database transaction handling in {service_name} creates deadlock potential under concurrent load. "
+            f"Multiple transactions compete for same resources in different orders. Database automatically "
+            f"terminates transactions, causing request failures and degraded user experience."
         )
     }
     
-    base_scenario = scenarios.get(risk_type, 
+    base_scenario = scenarios.get(risk_type,
         f"{service_name} architectural weakness will trigger under production load conditions, "
         f"causing service degradation and potential cascading failures."
     )
