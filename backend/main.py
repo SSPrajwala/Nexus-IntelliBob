@@ -716,16 +716,18 @@ async def calculate_blast_radius(request: BlastRadiusRequest):
 @app.post("/api/premortem")
 async def generate_premortem_intelligence(request: dict):
     """
-    Generate comprehensive pre-mortem intelligence report.
+    Generate comprehensive pre-mortem intelligence report with intelligent failure modes.
     Combines repository scan, blast radius, and incident DNA correlation.
     Supports both local paths and GitHub URLs.
+    Now supports failure modes: auto, all, specific
     """
     temp_manager = get_temp_manager()
     cloned_repo_path = None
     
     try:
         repo_path = request.get('repo_path', '').strip()
-        failed_service = request.get('failed_service', '').strip()
+        failure_mode = request.get('failure_mode', 'auto')
+        failed_service = request.get('failed_service', '').strip() if request.get('failed_service') else None
         
         # Validate inputs
         if not repo_path:
@@ -734,14 +736,23 @@ async def generate_premortem_intelligence(request: dict):
                 detail="Repository path cannot be empty"
             )
         
-        if not failed_service:
+        # Validate failure mode
+        if failure_mode not in ["auto", "all", "specific"]:
             raise HTTPException(
                 status_code=400,
-                detail="Failed service name cannot be empty"
+                detail="Invalid failure_mode. Must be 'auto', 'all', or 'specific'"
+            )
+        
+        # If specific mode, failed_service is required
+        if failure_mode == "specific" and not failed_service:
+            raise HTTPException(
+                status_code=400,
+                detail="Failed service name required when using 'specific' failure mode"
             )
         
         # Handle GitHub URLs
         if is_github_url(repo_path):
+            logger.info(f"🔍 CLONING GitHub repository: {repo_path}")
             ingestor = repo_ingestor.RepoIngestor()
             success, local_path, error = ingestor.clone_repository(repo_path)
             if not success:
@@ -752,6 +763,13 @@ async def generate_premortem_intelligence(request: dict):
             cloned_repo_path = local_path
             temp_manager.track(local_path)
             repo_path = local_path
+            logger.info(f"✅ Repository cloned to: {repo_path}")
+            
+            # Log repository contents for verification
+            import os
+            if os.path.exists(repo_path):
+                files = os.listdir(repo_path)[:10]  # First 10 files
+                logger.info(f"📁 Repository contents (first 10): {files}")
         else:
             # Resolve local path using centralized manager
             try:
@@ -765,11 +783,37 @@ async def generate_premortem_intelligence(request: dict):
                     detail=str(ve)
                 )
         
-        # Step 1: Scan repository for risks
-        scan_results = risk_scanner.scan_repository(repo_path)
+        # Determine failure target using intelligent simulation
+        from services.failure_simulator import simulate_failure
         
-        # Step 2: Compute blast radius
-        blast_results = blast_analyzer.analyze_blast_radius(repo_path, failed_service)
+        if failure_mode in ["auto", "all"]:
+            failure_target, failure_context = simulate_failure(
+                repo_path,
+                failure_mode=failure_mode
+            )
+            failed_service = failure_target['target_name']
+        elif not failed_service:
+            # If specific mode but no service provided, fall back to auto
+            failure_target, failure_context = simulate_failure(
+                repo_path,
+                failure_mode="auto"
+            )
+            failed_service = failure_target['target_name']
+        
+        # Step 1: Scan repository for risks
+        logger.info(f"📊 STEP 1: Scanning repository: {repo_path}")
+        scan_results = risk_scanner.scan_repository(repo_path)
+        logger.info(f"✅ Scan complete: {scan_results.get('total_risks', 0)} risks found, {scan_results.get('total_files_scanned', 0)} files scanned")
+        
+        # Step 2: Compute blast radius with failure mode
+        logger.info(f"💥 STEP 2: Computing blast radius (mode: {failure_mode}, target: {failed_service})")
+        blast_results = blast_analyzer.analyze_blast_radius(
+            repo_path,
+            failed_service=failed_service,
+            failure_mode=failure_mode
+        )
+        affected_count = len(blast_results.get('affected_services', []))
+        logger.info(f"✅ Blast radius computed: {affected_count} services affected, criticality: {blast_results.get('criticality_score', 0)}")
         
         # Step 3: Correlate with incident DNA (get similar patterns)
         dna_matches = []
@@ -782,17 +826,21 @@ async def generate_premortem_intelligence(request: dict):
                         'confidence': match.get('confidence', 0.7),
                         'description': match.get('explanation', '')
                     })
+        logger.info(f"🧬 STEP 3: DNA correlation: {len(dna_matches)} patterns matched")
         
-        # Step 4: Generate pre-mortem report
+        # Step 4: Generate pre-mortem report with repository path for dynamic analysis
+        logger.info(f"📝 STEP 4: Generating pre-mortem report with repo_path: {repo_path}")
         premortem_report = premortem_generator.generate_premortem(
             scan_results,
             blast_results,
-            dna_matches
+            dna_matches,
+            repo_path=repo_path  # PASS REPO PATH FOR DYNAMIC ANALYSIS
         )
+        logger.info(f"✅ Pre-mortem generated: {premortem_report.get('incident_title', 'Unknown')}")
         
         return {
             "success": True,
-            "message": "Pre-mortem intelligence report generated successfully",
+            "message": f"Pre-mortem intelligence report generated successfully (mode: {failure_mode})",
             "report": premortem_report
         }
         

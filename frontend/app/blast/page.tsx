@@ -6,6 +6,7 @@ import { api } from "@/lib/api";
 import BlastGraph from "@/components/BlastGraph";
 import FailureTimeline from "@/components/FailureTimeline";
 import MetricCard from "@/components/MetricCard";
+import PDFDownloadButton from "@/components/PDFDownloadButton";
 import LoadingState from "@/components/LoadingState";
 
 export default function BlastPage() {
@@ -289,8 +290,26 @@ export default function BlastPage() {
       {/* Results */}
       {result && !animating && (
         <>
-          {/* Impact Summary Cards */}
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+          {/* Report Header with PDF Download */}
+          <div className="flex items-center justify-between mb-6">
+            <div>
+              <h2 className="text-2xl font-bold text-white">Blast Radius Analysis</h2>
+              <p className="text-sm text-gray-400 mt-1">
+                Service dependency and failure propagation analysis
+              </p>
+            </div>
+            <PDFDownloadButton
+              elementId="blast-radius-report-content"
+              filename="Nexus-Blast-Radius-Report.pdf"
+              title="Nexus-IntelliBob Blast Radius Analysis"
+              variant="primary"
+            />
+          </div>
+
+          {/* Wrapped Report Content for PDF Export */}
+          <div id="blast-radius-report-content" className="space-y-6">
+            {/* Impact Summary Cards */}
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
             <MetricCard
               title="Criticality Score"
               value={result.criticality_score || 0}
@@ -407,6 +426,7 @@ export default function BlastPage() {
               </div>
             </div>
           )}
+          </div>
         </>
       )}
     </div>

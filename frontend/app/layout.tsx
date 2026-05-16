@@ -1,12 +1,14 @@
 import type { Metadata } from "next";
-import { GeistSans } from "geist/font/sans";
-import { GeistMono } from "geist/font/mono";
+import { Inter } from "next/font/google";
 import "./globals.css";
-import Sidebar from "@/components/Sidebar";
+import ClientLayout from "@/components/ClientLayout";
+
+const inter = Inter({ subsets: ["latin"], variable: "--font-inter" });
 
 export const metadata: Metadata = {
-  title: "Nexus-IntelliBob | AI Incident Intelligence",
-  description: "AI Incident Intelligence for Living Codebases",
+  title: "Nexus-IntelliBob | AI Incident Intelligence Platform",
+  description: "Enterprise AI platform for predicting and preventing system failures. Analyzing Systems. Predicting Failures.",
+  keywords: ["AI", "Incident Intelligence", "System Reliability", "Failure Prediction", "DevOps"],
 };
 
 export default function RootLayout({
@@ -15,19 +17,9 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html lang="en" className={`${GeistSans.variable} ${GeistMono.variable}`}>
-      <body className="antialiased">
-        <div className="flex h-screen overflow-hidden bg-[#0a0a0f]">
-          {/* Sidebar */}
-          <Sidebar />
-          
-          {/* Main content */}
-          <main className="flex-1 overflow-y-auto">
-            <div className="container mx-auto p-6 max-w-7xl">
-              {children}
-            </div>
-          </main>
-        </div>
+    <html lang="en" className={inter.variable} suppressHydrationWarning>
+      <body className="antialiased font-sans">
+        <ClientLayout>{children}</ClientLayout>
       </body>
     </html>
   );

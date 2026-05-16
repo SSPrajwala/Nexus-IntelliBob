@@ -167,10 +167,11 @@ export const api = {
     });
   },
 
-  // Generate pre-mortem intelligence report (new comprehensive version)
+  // Generate pre-mortem intelligence report (new comprehensive version with failure modes)
   generatePreMortem: async (data: {
     repo_path: string;
-    failed_service: string;
+    failure_mode?: string;
+    failed_service?: string;
   }): Promise<{
     success: boolean;
     message: string;

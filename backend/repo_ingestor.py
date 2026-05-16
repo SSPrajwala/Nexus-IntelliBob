@@ -77,21 +77,24 @@ class RepoIngestor:
     
     def sanitize_repo_name(self, url: str) -> str:
         """
-        Extract and sanitize repository name from URL
+        Extract and sanitize repository name from URL with timestamp for uniqueness
         
         Args:
             url: GitHub URL
             
         Returns:
-            Sanitized repository name
+            Sanitized repository name with timestamp
         """
+        import time
         owner, repo = self.extract_repo_metadata(url)
-        sanitized = re.sub(r'[^\w-]', '_', f"{owner}_{repo}")
+        timestamp = int(time.time() * 1000)  # milliseconds for uniqueness
+        sanitized = re.sub(r'[^\w-]', '_', f"{owner}_{repo}_{timestamp}")
         return sanitized
     
     def clone_repository(self, github_url: str) -> Tuple[bool, str, Optional[str]]:
         """
-        Clone a GitHub repository using shallow clone
+        Clone a GitHub repository using shallow clone.
+        Each clone gets a unique path with timestamp to ensure fresh analysis.
         
         Args:
             github_url: GitHub repository URL
@@ -103,14 +106,12 @@ class RepoIngestor:
             return False, "", "Invalid GitHub URL format"
         
         try:
-            # Sanitize repo name
+            # Generate unique repo name with timestamp
             repo_name = self.sanitize_repo_name(github_url)
             local_path = os.path.join(self.temp_dir, repo_name)
             
-            # Check if already cloned
-            if os.path.exists(local_path):
-                logger.info(f"Repository already exists at {local_path}")
-                return True, local_path, None
+            # REMOVED: Check if already cloned - always clone fresh for accurate analysis
+            # This ensures different repos or same repo at different times get unique analysis
             
             logger.info(f"Cloning repository: {github_url}")
             

@@ -2,23 +2,60 @@
 @tailwind components;
 @tailwind utilities;
 
+/* Nexus-IntelliBob Theme Variables */
 :root {
-  --background: 240 10% 3.9%;
-  --foreground: 240 5% 90%;
-  --card: 240 10% 10%;
-  --card-foreground: 240 5% 90%;
-  --primary: 0 84% 60%;
+  /* Dark Theme (Default) */
+  --bg: #0B0F19;
+  --bg-secondary: #0F1629;
+  --card: rgba(255, 255, 255, 0.05);
+  --card-hover: rgba(255, 255, 255, 0.08);
+  --text: #FFFFFF;
+  --text-secondary: #9CA3AF;
+  --accent: #3B82F6;
+  --accent-hover: #2563EB;
+  --border: rgba(59, 130, 246, 0.2);
+  --glow: rgba(59, 130, 246, 0.3);
+  
+  /* Legacy HSL variables for compatibility */
+  --background: 222 47% 7%;
+  --foreground: 220 9% 90%;
+  --primary: 217 91% 60%;
   --primary-foreground: 0 0% 98%;
-  --secondary: 240 6% 15%;
-  --secondary-foreground: 240 5% 90%;
-  --muted: 240 6% 15%;
-  --muted-foreground: 240 5% 65%;
-  --accent: 240 6% 15%;
-  --accent-foreground: 240 5% 90%;
-  --border: 240 6% 15%;
-  --input: 240 6% 15%;
-  --ring: 0 84% 60%;
-  --radius: 0.5rem;
+  --secondary: 222 30% 12%;
+  --secondary-foreground: 220 9% 90%;
+  --muted: 222 30% 12%;
+  --muted-foreground: 220 9% 65%;
+  --border: 222 30% 15%;
+  --input: 222 30% 12%;
+  --ring: 217 91% 60%;
+  --radius: 0.75rem;
+}
+
+/* Light Theme */
+.light {
+  --bg: #F4F4F4;
+  --bg-secondary: #FFFFFF;
+  --card: #FFFFFF;
+  --card-hover: #F9FAFB;
+  --text: #161616;
+  --text-secondary: #6B7280;
+  --accent: #0F62FE;
+  --accent-hover: #0353E9;
+  --border: rgba(15, 98, 254, 0.2);
+  --glow: rgba(15, 98, 254, 0.2);
+  
+  /* Legacy HSL variables for light mode */
+  --background: 0 0% 96%;
+  --foreground: 0 0% 9%;
+  --primary: 217 100% 53%;
+  --primary-foreground: 0 0% 98%;
+  --secondary: 0 0% 100%;
+  --secondary-foreground: 0 0% 9%;
+  --muted: 0 0% 98%;
+  --muted-foreground: 0 0% 42%;
+  --border: 0 0% 90%;
+  --input: 0 0% 100%;
+  --ring: 217 100% 53%;
 }
 
 * {
@@ -103,7 +140,38 @@ code {
   animation: fadeIn 0.3s ease-out;
 }
 
-/* Card styles */
+/* Glassmorphism Card Styles */
+.glass-card {
+  background: var(--card);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  border: 1px solid var(--border);
+  border-radius: 1rem;
+  box-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.37);
+  transition: all 0.3s ease;
+}
+
+.glass-card:hover {
+  background: var(--card-hover);
+  border-color: var(--accent);
+  box-shadow: 0 8px 32px 0 var(--glow);
+  transform: translateY(-2px);
+}
+
+.glass-panel {
+  background: rgba(255, 255, 255, 0.03);
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 1.5rem;
+}
+
+.light .glass-panel {
+  background: rgba(255, 255, 255, 0.8);
+  border: 1px solid rgba(0, 0, 0, 0.1);
+}
+
+/* Card styles (legacy) */
 .card {
   @apply bg-card border border-border rounded-lg p-4 shadow-sm;
 }

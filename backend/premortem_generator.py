@@ -10,39 +10,172 @@ import hashlib
 from typing import Dict, List, Optional
 from datetime import datetime, timedelta
 import random
+import os
+from pathlib import Path
+from utils.logger import logger
+
+
+def analyze_repository_structure(repo_path: str) -> Dict:
+    """
+    Analyze actual repository to extract real patterns.
+    This makes premortem dynamic and repository-specific.
+    
+    Returns:
+        Dictionary containing repository analysis results
+    """
+    analysis = {
+        "total_files": 0,
+        "python_files": 0,
+        "has_async": False,
+        "has_database": False,
+        "has_api": False,
+        "has_error_handling": False,
+        "has_timeouts": False,
+        "async_files": [],
+        "db_files": [],
+        "api_files": [],
+        "modules": set(),
+        "imports": set(),
+        "framework": None  # FastAPI, Flask, Django, etc.
+    }
+    
+    try:
+        repo_path_obj = Path(repo_path)
+        if not repo_path_obj.exists():
+            logger.warning(f"Repository path does not exist: {repo_path}")
+            return analysis
+        
+        for root, dirs, files in os.walk(repo_path):
+            # Skip common non-code directories
+            dirs[:] = [d for d in dirs if d not in ['.git', '__pycache__', 'node_modules', '.venv', 'venv', 'dist', 'build']]
+            
+            for file in files:
+                analysis["total_files"] += 1
+                
+                if file.endswith('.py'):
+                    analysis["python_files"] += 1
+                    file_path = os.path.join(root, file)
+                    
+                    try:
+                        with open(file_path, 'r', encoding='utf-8', errors='ignore') as f:
+                            content = f.read()
+                        
+                        # Detect async patterns
+                        if "async def" in content or "await " in content or "asyncio" in content:
+                            analysis["has_async"] = True
+                            analysis["async_files"].append(file)
+                        
+                        # Detect database patterns
+                        db_keywords = ["db.", "session.", "query", "Session(", "engine", "SQLAlchemy", "pymongo", "psycopg"]
+                        if any(keyword in content for keyword in db_keywords):
+                            analysis["has_database"] = True
+                            analysis["db_files"].append(file)
+                        
+                        # Detect API frameworks
+                        if "FastAPI" in content or "@app.get" in content or "@app.post" in content:
+                            analysis["has_api"] = True
+                            analysis["api_files"].append(file)
+                            if not analysis["framework"]:
+                                analysis["framework"] = "FastAPI"
+                        elif "Flask" in content or "@app.route" in content or "from flask import" in content:
+                            analysis["has_api"] = True
+                            analysis["api_files"].append(file)
+                            if not analysis["framework"]:
+                                analysis["framework"] = "Flask"
+                        elif "Django" in content or "django.http" in content:
+                            analysis["has_api"] = True
+                            analysis["api_files"].append(file)
+                            if not analysis["framework"]:
+                                analysis["framework"] = "Django"
+                        
+                        # Detect error handling
+                        if "try:" in content or "except" in content:
+                            analysis["has_error_handling"] = True
+                        
+                        # Detect timeout configurations
+                        if "timeout=" in content or "TIMEOUT" in content:
+                            analysis["has_timeouts"] = True
+                        
+                        # Extract module name
+                        rel_path = os.path.relpath(file_path, repo_path)
+                        module = rel_path.replace(os.sep, '.').replace('.py', '')
+                        analysis["modules"].add(module)
+                        
+                    except Exception as e:
+                        logger.debug(f"Error reading file {file_path}: {e}")
+                        continue
+        
+        # Convert sets to lists for JSON serialization
+        analysis["modules"] = list(analysis["modules"])
+        analysis["imports"] = list(analysis["imports"])
+        
+        logger.info(f"Repository analysis complete: {analysis['python_files']} Python files, "
+                   f"Framework: {analysis['framework']}, Async: {analysis['has_async']}, "
+                   f"DB: {analysis['has_database']}, API: {analysis['has_api']}")
+    
+    except Exception as e:
+        logger.error(f"Error analyzing repository structure: {e}")
+    
+    return analysis
+
+
+def _generate_dynamic_incident_title(failed_service: str, pattern_type: str, repo_analysis: Dict) -> str:
+    """Generate title based on actual repository characteristics"""
+    service_name = failed_service.replace('-service', '').replace('_', ' ').replace('-', ' ').title()
+    
+    # Add repository-specific context
+    if repo_analysis.get('has_async') and not repo_analysis.get('has_error_handling'):
+        return f"Async Operation Failure in {service_name} Under Load"
+    elif repo_analysis.get('has_database') and not repo_analysis.get('has_timeouts'):
+        return f"Database Connection Failure in {service_name}"
+    elif repo_analysis.get('has_api'):
+        framework = repo_analysis.get('framework', 'API')
+        return f"{framework} Endpoint Failure in {service_name}"
+    else:
+        # Use pattern type as fallback
+        titles = {
+            "RETRY_STORM": f"Cascading Retry Storm in {service_name} Under Load",
+            "RESOURCE_EXHAUSTION": f"{service_name} Connection Pool Exhaustion",
+            "CASCADING_TIMEOUT": f"Timeout Cascade Originating from {service_name}",
+            "MISSING_TIMEOUT": f"{service_name} Hanging Requests Causing Degradation",
+            "SMALL_CONNECTION_POOL": f"{service_name} Database Bottleneck Under Traffic Spike",
+            "HARDCODED_SECRET": f"Authentication Failure in {service_name} Post-Rotation",
+            "MISSING_CIRCUIT_BREAKER": f"{service_name} Cascading Failure Without Circuit Protection",
+            "MEMORY_LEAK": f"Memory Leak in {service_name} Causing Gradual Degradation",
+            "RACE_CONDITION": f"Race Condition in {service_name} Under Concurrent Load",
+            "DEADLOCK": f"Database Deadlock in {service_name} Transaction Processing"
+        }
+        return titles.get(pattern_type, f"Critical Failure in {service_name}")
 
 
 def _generate_incident_title(failed_service: str, pattern_type: str) -> str:
-    """Generate realistic incident title - works for any service name"""
-    # Clean up service name for display
-    service_name = failed_service.replace('-service', '').replace('_', ' ').replace('-', ' ').title()
-    
-    titles = {
-        "RETRY_STORM": f"Cascading Retry Storm in {service_name} Under Load",
-        "RESOURCE_EXHAUSTION": f"{service_name} Connection Pool Exhaustion",
-        "CASCADING_TIMEOUT": f"Timeout Cascade Originating from {service_name}",
-        "MISSING_TIMEOUT": f"{service_name} Hanging Requests Causing Degradation",
-        "SMALL_CONNECTION_POOL": f"{service_name} Database Bottleneck Under Traffic Spike",
-        "HARDCODED_SECRET": f"Authentication Failure in {service_name} Post-Rotation",
-        "MISSING_CIRCUIT_BREAKER": f"{service_name} Cascading Failure Without Circuit Protection",
-        "MEMORY_LEAK": f"Memory Leak in {service_name} Causing Gradual Degradation",
-        "RACE_CONDITION": f"Race Condition in {service_name} Under Concurrent Load",
-        "DEADLOCK": f"Database Deadlock in {service_name} Transaction Processing"
-    }
-    
-    return titles.get(pattern_type, f"Critical Failure in {service_name}")
+    """Generate realistic incident title - works for any service name (legacy fallback)"""
+    return _generate_dynamic_incident_title(failed_service, pattern_type, {})
 
 
-def _generate_executive_summary(failed_service: str, affected_services: List[str],
-                                 primary_risk: Dict, criticality_score: int) -> str:
-    """Generate executive summary - works for any service name"""
-    # Clean up service name for display
+def _generate_dynamic_executive_summary(failed_service: str, affected_services: List[str],
+                                        primary_risk: Dict, criticality_score: int, repo_analysis: Dict) -> str:
+    """Generate executive summary based on actual repository analysis"""
     service_name = failed_service.replace('-service', '').replace('_', ' ').replace('-', ' ').title()
     affected_count = len(affected_services)
     
     severity_desc = "CRITICAL" if criticality_score >= 90 else "HIGH" if criticality_score >= 70 else "MEDIUM"
     
-    summary = f"Intelligence analysis indicates {severity_desc} probability of cascading failure originating from {service_name}. "
+    # Add repository-specific context
+    repo_context = ""
+    if repo_analysis:
+        framework = repo_analysis.get('framework')
+        if framework:
+            repo_context = f"Repository analysis reveals {framework}-based architecture. "
+        
+        if repo_analysis.get('has_async') and repo_analysis.get('has_database'):
+            repo_context += f"Async operations combined with database calls create complex failure modes. "
+        elif repo_analysis.get('has_async'):
+            repo_context += f"Async operations without proper error handling increase failure risk. "
+        elif repo_analysis.get('has_database'):
+            repo_context += f"Database dependencies without timeout configuration pose availability risk. "
+    
+    summary = f"{repo_context}Intelligence analysis indicates {severity_desc} probability of cascading failure originating from {service_name}. "
     
     if affected_count > 0:
         summary += f"Predicted blast radius encompasses {affected_count} dependent service{'s' if affected_count != 1 else ''}, "
@@ -54,72 +187,84 @@ def _generate_executive_summary(failed_service: str, affected_services: List[str
     return summary
 
 
-def _generate_failure_scenario(failed_service: str, primary_risk: Dict,
-                                propagation_chain: List[Dict]) -> str:
-    """Generate detailed failure scenario - works for any service name"""
-    # Clean up service name for display
+def _generate_executive_summary(failed_service: str, affected_services: List[str],
+                                 primary_risk: Dict, criticality_score: int) -> str:
+    """Generate executive summary - works for any service name (legacy fallback)"""
+    return _generate_dynamic_executive_summary(failed_service, affected_services, primary_risk, criticality_score, {})
+
+
+def _generate_dynamic_failure_scenario(failed_service: str, primary_risk: Dict,
+                                       propagation_chain: List[Dict], repo_analysis: Dict) -> str:
+    """Generate scenario based on ACTUAL repository code patterns"""
     service_name = failed_service.replace('-service', '').replace('_', ' ').replace('-', ' ').title()
-    risk_type = primary_risk.get('risk_type', 'UNKNOWN')
     
-    scenarios = {
-        "RETRY_STORM": (
-            f"Under elevated traffic conditions, {service_name} retry logic without exponential backoff "
-            f"will amplify request volume by 5-10x. This creates a positive feedback loop where each "
-            f"failed request triggers multiple retries, overwhelming downstream services. "
-            f"Connection pools exhaust within 2-3 minutes, causing complete service degradation."
-        ),
-        "SMALL_CONNECTION_POOL": (
-            f"{service_name} database connection pool (size: 3-5) will saturate under normal peak traffic. "
-            f"Incoming requests will queue indefinitely, causing thread pool exhaustion. "
-            f"Cascading timeouts propagate to dependent services within 15-30 seconds. "
-            f"Recovery requires service restart and connection pool reconfiguration."
-        ),
-        "MISSING_TIMEOUT": (
-            f"HTTP requests in {service_name} without timeout configuration will hang indefinitely "
-            f"when downstream services experience latency. Worker threads become blocked, "
-            f"preventing new request processing. Service appears healthy to load balancers "
-            f"but cannot process traffic, creating silent partial failure."
-        ),
-        "MISSING_CIRCUIT_BREAKER": (
-            f"{service_name} lacks circuit breaker protection on external service calls. "
-            f"When downstream dependency degrades, {service_name} continues sending requests, "
-            f"exhausting connection pools and thread resources. Failure cascades to all "
-            f"dependent services within 1-2 minutes of initial degradation."
-        ),
-        "HARDCODED_SECRET": (
-            f"Hardcoded credentials in {service_name} prevent automated secret rotation. "
-            f"During security incident or scheduled rotation, service authentication fails "
-            f"immediately. Manual code deployment required for recovery, extending outage "
-            f"duration to 30-60 minutes minimum."
-        ),
-        "MEMORY_LEAK": (
-            f"{service_name} exhibits gradual memory consumption increase without proper garbage collection. "
-            f"Under sustained load, heap memory exhausts after 4-6 hours, triggering OutOfMemory errors. "
-            f"Service becomes unresponsive, requiring restart. Pattern repeats cyclically."
-        ),
-        "RACE_CONDITION": (
-            f"Concurrent request processing in {service_name} exposes race condition in shared state management. "
-            f"Under high concurrency, data corruption occurs intermittently. Symptoms include inconsistent "
-            f"responses and data integrity violations. Issue amplifies with traffic volume."
-        ),
-        "DEADLOCK": (
-            f"Database transaction handling in {service_name} creates deadlock potential under concurrent load. "
-            f"Multiple transactions compete for same resources in different orders. Database automatically "
-            f"terminates transactions, causing request failures and degraded user experience."
+    # Build scenario from actual code analysis
+    scenario_parts = []
+    
+    if repo_analysis:
+        # Scenario based on actual repository characteristics
+        if repo_analysis.get('has_async') and not repo_analysis.get('has_error_handling'):
+            async_count = len(repo_analysis.get('async_files', []))
+            scenario_parts.append(
+                f"Repository analysis reveals {async_count} file(s) with async operations. "
+                f"Under high load, unhandled async errors in {service_name} will cause request timeouts. "
+                f"Worker threads become blocked, preventing new request processing."
+            )
+        
+        if repo_analysis.get('has_database') and not repo_analysis.get('has_timeouts'):
+            db_count = len(repo_analysis.get('db_files', []))
+            scenario_parts.append(
+                f"Database interactions detected in {db_count} file(s). "
+                f"Without connection timeouts, {service_name} will hang indefinitely on database latency. "
+                f"Connection pool exhaustion occurs within 2-3 minutes under normal load."
+            )
+        
+        if repo_analysis.get('has_api'):
+            api_count = len(repo_analysis.get('api_files', []))
+            framework = repo_analysis.get('framework', 'API')
+            scenario_parts.append(
+                f"{framework} endpoints found in {api_count} file(s). "
+                f"When {service_name} experiences degradation, dependent services continue sending requests, "
+                f"amplifying the failure and causing cascading timeouts."
+            )
+        
+        # Add framework-specific scenarios
+        framework = repo_analysis.get('framework')
+        if framework == 'FastAPI':
+            scenario_parts.append(
+                f"FastAPI's async nature means blocking operations will degrade entire event loop. "
+                f"Single slow database query can block all concurrent requests."
+            )
+        elif framework == 'Flask':
+            scenario_parts.append(
+                f"Flask's synchronous request handling means each blocked request consumes a worker thread. "
+                f"Thread pool exhaustion occurs rapidly under load."
+            )
+    
+    # If no specific patterns found, use generic but still reference repo
+    if not scenario_parts:
+        python_files = repo_analysis.get('python_files', 0) if repo_analysis else 0
+        scenario_parts.append(
+            f"Repository analysis of {python_files} Python file(s) reveals "
+            f"architectural weaknesses in {service_name}. Under production load conditions, "
+            f"these patterns will trigger service degradation and potential cascading failures."
         )
-    }
     
-    base_scenario = scenarios.get(risk_type,
-        f"{service_name} architectural weakness will trigger under production load conditions, "
-        f"causing service degradation and potential cascading failures."
-    )
+    base_scenario = " ".join(scenario_parts)
     
+    # Add propagation chain if available
     if propagation_chain:
         base_scenario += f"\n\nPropagation sequence: "
         for i, step in enumerate(propagation_chain[:3], 1):
             base_scenario += f"\n{i}. T+{step['time_offset']}s: {step['description']}"
     
     return base_scenario
+
+
+def _generate_failure_scenario(failed_service: str, primary_risk: Dict,
+                                propagation_chain: List[Dict]) -> str:
+    """Generate detailed failure scenario - works for any service name (legacy fallback)"""
+    return _generate_dynamic_failure_scenario(failed_service, primary_risk, propagation_chain, {})
 
 
 def _generate_root_cause(primary_risk: Dict) -> str:
@@ -365,18 +510,28 @@ def _estimate_time_to_incident(primary_risk: Dict, criticality_score: int) -> st
         return "1-3 months, dependent on traffic growth and system evolution"
 
 
-def generate_premortem(scan_results: Dict, blast_radius: Dict, dna_matches: List[Dict]) -> Dict:
+def generate_premortem(scan_results: Dict, blast_radius: Dict, dna_matches: List[Dict], repo_path: Optional[str] = None) -> Dict:
     """
-    Generate comprehensive pre-mortem intelligence report
+    Generate comprehensive pre-mortem intelligence report.
+    NOW REPOSITORY-AWARE - analyzes actual code structure.
     
     Args:
         scan_results: Repository risk scan results
         blast_radius: Blast radius analysis results
         dna_matches: Correlated incident DNA patterns
+        repo_path: Path to repository for dynamic analysis (optional)
         
     Returns:
         Complete pre-mortem report dictionary
     """
+    # Analyze actual repository if path provided
+    repo_analysis = {}
+    if repo_path:
+        logger.info(f"Analyzing repository structure for dynamic premortem: {repo_path}")
+        repo_analysis = analyze_repository_structure(repo_path)
+    else:
+        logger.warning("No repo_path provided - using generic premortem generation")
+    
     # Extract key information
     failed_service = blast_radius.get('root_failure_service', 'unknown-service')
     affected_services = blast_radius.get('affected_services', [])
@@ -392,10 +547,10 @@ def generate_premortem(scan_results: Dict, blast_radius: Dict, dna_matches: List
         'explanation': 'Architectural weakness detected'
     }
     
-    # Generate report components
-    incident_title = _generate_incident_title(failed_service, primary_risk.get('risk_type', 'UNKNOWN'))
-    executive_summary = _generate_executive_summary(failed_service, affected_services, primary_risk, criticality_score)
-    failure_scenario = _generate_failure_scenario(failed_service, primary_risk, propagation_chain)
+    # Generate DYNAMIC report components based on actual repo
+    incident_title = _generate_dynamic_incident_title(failed_service, primary_risk.get('risk_type', 'UNKNOWN'), repo_analysis)
+    executive_summary = _generate_dynamic_executive_summary(failed_service, affected_services, primary_risk, criticality_score, repo_analysis)
+    failure_scenario = _generate_dynamic_failure_scenario(failed_service, primary_risk, propagation_chain, repo_analysis)
     root_cause = _generate_root_cause(primary_risk)
     outage_timeline = _generate_outage_timeline(failed_service, propagation_chain)
     customer_impact = _estimate_customer_impact(criticality_score, affected_services)

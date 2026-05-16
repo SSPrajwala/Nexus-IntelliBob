@@ -1,9 +1,10 @@
 "use client";
 
 import { useState } from "react";
-import { Search, FolderOpen, AlertTriangle, CheckCircle, Filter, ArrowUpDown } from "lucide-react";
+import { Search, Github, AlertTriangle, CheckCircle, Filter, ArrowUpDown, ExternalLink } from "lucide-react";
 import LoadingState from "@/components/LoadingState";
 import RiskMatchCard from "@/components/RiskMatchCard";
+import PDFDownloadButton from "@/components/PDFDownloadButton";
 import { api } from "@/lib/api";
 import { RiskMatch, ScanRepoResponse } from "@/types";
 
@@ -19,8 +20,14 @@ const scanStages = [
   { id: "computing", label: "Computing risk graph", duration: 900 },
 ];
 
+const exampleRepos = [
+  { url: "https://github.com/vercel/next.js", label: "vercel/next.js" },
+  { url: "https://github.com/facebook/react", label: "facebook/react" },
+  { url: "https://github.com/nodejs/node", label: "nodejs/node" },
+];
+
 export default function ScanPage() {
-  const [repoPath, setRepoPath] = useState("demo-repos/payment-system");
+  const [repoPath, setRepoPath] = useState("");
   const [scanning, setScanning] = useState(false);
   const [currentStage, setCurrentStage] = useState<ScanStage>("idle");
   const [scanResults, setScanResults] = useState<ScanRepoResponse | null>(null);
@@ -28,8 +35,20 @@ export default function ScanPage() {
   const [severityFilter, setSeverityFilter] = useState<SeverityFilter>("all");
   const [sortBy, setSortBy] = useState<SortOption>("severity");
 
+  const isValidGitHubUrl = (url: string): boolean => {
+    const githubPattern = /^https?:\/\/(www\.)?github\.com\/[\w-]+\/[\w.-]+\/?$/;
+    return githubPattern.test(url.trim());
+  };
+
   const handleScan = async () => {
-    if (!repoPath.trim()) return;
+    const trimmedPath = repoPath.trim();
+    if (!trimmedPath) return;
+    
+    // Validate GitHub URL
+    if (!isValidGitHubUrl(trimmedPath)) {
+      setError("Please enter a valid GitHub repository URL (e.g., https://github.com/owner/repo)");
+      return;
+    }
     
     setScanning(true);
     setError(null);
@@ -171,41 +190,75 @@ export default function ScanPage() {
       </div>
 
       {/* Scan Form */}
-      <div className="bg-[#18181b] border border-[#27272a] rounded-lg p-6">
-        <h2 className="text-xl font-semibold text-white mb-4">
-          Repository Details
-        </h2>
+      <div className="glass-card rounded-lg p-6">
+        <div className="flex items-center gap-3 mb-4">
+          <div className="w-10 h-10 rounded-lg bg-gradient-to-br from-red-500 to-orange-500 flex items-center justify-center">
+            <Github className="w-5 h-5 text-white" />
+          </div>
+          <div>
+            <h2 className="text-xl font-semibold text-white">
+              GitHub Repository Analysis
+            </h2>
+            <p className="text-sm text-gray-400">
+              Analyze any public GitHub repository
+            </p>
+          </div>
+        </div>
         
         <div className="space-y-4">
           <div>
             <label className="block text-sm font-medium text-gray-300 mb-2">
-              Repository Path
+              GitHub Repository URL
             </label>
-            <div className="flex gap-2">
+            <div className="relative">
+              <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
+                <Github className="w-5 h-5 text-gray-500" />
+              </div>
               <input
                 type="text"
                 value={repoPath}
-                onChange={(e) => setRepoPath(e.target.value)}
-                placeholder="demo-repos/payment-system"
-                className="flex-1 bg-[#27272a] border border-[#3f3f46] rounded-md px-4 py-2 text-white placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-red-500 focus:border-transparent"
+                onChange={(e) => {
+                  setRepoPath(e.target.value);
+                  setError(null); // Clear error on input change
+                }}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' && repoPath.trim()) {
+                    handleScan();
+                  }
+                }}
+                placeholder="Enter GitHub repository URL"
+                className="w-full bg-[#27272a] border border-[#3f3f46] rounded-md pl-10 pr-4 py-3 text-white placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-red-500 focus:border-transparent transition-all"
               />
-              <button className="px-4 py-2 bg-[#27272a] text-white rounded-md hover:bg-[#3f3f46] transition-colors flex items-center gap-2">
-                <FolderOpen className="w-4 h-4" />
-                Browse
-              </button>
             </div>
-            <p className="text-xs text-gray-500 mt-1">
-              Try: demo-repos/payment-system
+            <p className="text-sm text-gray-400 mt-2">
+              Analyze any GitHub repository to detect risks, map architecture, and generate AI-powered failure predictions.
             </p>
+          </div>
+
+          {/* Example Links */}
+          <div className="space-y-2">
+            <p className="text-xs font-medium text-gray-400">Try these examples:</p>
+            <div className="flex flex-wrap gap-2">
+              {exampleRepos.map((repo) => (
+                <button
+                  key={repo.url}
+                  onClick={() => setRepoPath(repo.url)}
+                  className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-[#27272a] hover:bg-[#3f3f46] border border-[#3f3f46] rounded-md text-xs text-gray-300 transition-colors group"
+                >
+                  <ExternalLink className="w-3 h-3 text-gray-500 group-hover:text-red-400 transition-colors" />
+                  {repo.label}
+                </button>
+              ))}
+            </div>
           </div>
 
           <button
             onClick={handleScan}
             disabled={!repoPath.trim() || scanning}
-            className="w-full flex items-center justify-center gap-2 px-4 py-3 bg-red-500 text-white rounded-md hover:bg-red-600 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+            className="w-full flex items-center justify-center gap-2 px-4 py-3 bg-gradient-to-r from-red-500 to-orange-500 text-white rounded-md hover:from-red-600 hover:to-orange-600 transition-all disabled:opacity-50 disabled:cursor-not-allowed font-medium shadow-lg shadow-red-500/20"
           >
             <Search className="w-5 h-5" />
-            Start Scan
+            Analyze Repository
           </button>
         </div>
       </div>
@@ -226,8 +279,26 @@ export default function ScanPage() {
       {/* Results */}
       {scanResults && currentStage === "complete" && (
         <>
-          {/* Stats Summary */}
-          <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
+          {/* Report Header with PDF Download */}
+          <div className="flex items-center justify-between">
+            <div>
+              <h2 className="text-2xl font-bold text-white">Scan Results</h2>
+              <p className="text-sm text-gray-400 mt-1">
+                Repository analysis complete
+              </p>
+            </div>
+            <PDFDownloadButton
+              elementId="scan-report-content"
+              filename="Nexus-Scan-Report.pdf"
+              title="Nexus-IntelliBob Risk Scan Report"
+              variant="primary"
+            />
+          </div>
+
+          {/* Wrapped Report Content for PDF Export */}
+          <div id="scan-report-content" className="space-y-6">
+            {/* Stats Summary */}
+            <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
             <div className="bg-[#18181b] border border-[#27272a] rounded-lg p-4">
               <div className="text-2xl font-bold text-white">{scanResults.total_files_scanned || 0}</div>
               <div className="text-xs text-gray-400 mt-1">Files Scanned</div>
@@ -304,6 +375,7 @@ export default function ScanPage() {
                 </p>
               </div>
             )}
+          </div>
           </div>
         </>
       )}
